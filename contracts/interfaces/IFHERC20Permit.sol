@@ -2,7 +2,15 @@
 pragma solidity ^0.8.25;
 
 interface IFHERC20Permit {
-    function permit(address owner, address spender, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external;
+    function permit(
+        address owner,
+        address spender,
+        uint48 until,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
 
     /**
      * @dev Returns the current nonce for `owner`. This value must be

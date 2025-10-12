@@ -79,13 +79,13 @@ export const expectERC20BalancesChange = async (token: ERC20, account: string, e
   );
 };
 
-// ConfidentialTransferFromPermit
+// Operator Permit
 type GeneratePermitOptions = {
   signer: HardhatEthersSigner;
   token: FHERC20;
   owner: string;
   spender: string;
-  valueHash: bigint;
+  until: number | bigint;
   nonce?: bigint;
   deadline?: bigint;
 };
@@ -94,10 +94,8 @@ export const getNowTimestamp = () => {
   return BigInt(Date.now()) / 1000n;
 };
 
-export const generateTransferFromPermit = async (
-  options: GeneratePermitOptions,
-): Promise<IFHERC20.FHERC20_EIP712_PermitStruct> => {
-  let { token, signer, owner, spender, valueHash, nonce, deadline } = options;
+export const generateTransferFromPermit = async (options: GeneratePermitOptions) => {
+  let { token, signer, owner, spender, until, nonce, deadline } = options;
 
   const { name, version, chainId, verifyingContract } = await token.eip712Domain();
 
@@ -118,7 +116,7 @@ export const generateTransferFromPermit = async (
     Permit: [
       { name: "owner", type: "address" },
       { name: "spender", type: "address" },
-      { name: "value_hash", type: "uint256" },
+      { name: "until", type: "uint48" },
       { name: "nonce", type: "uint256" },
       { name: "deadline", type: "uint256" },
     ],
@@ -127,9 +125,9 @@ export const generateTransferFromPermit = async (
   const message = {
     owner,
     spender,
-    value_hash: valueHash,
-    nonce: nonce,
-    deadline: deadline,
+    until,
+    nonce,
+    deadline,
   };
 
   const signature = await signer.signTypedData(domain, types, message);
@@ -138,8 +136,8 @@ export const generateTransferFromPermit = async (
   return {
     owner,
     spender,
-    value_hash: valueHash,
-    deadline: deadline,
+    until,
+    deadline,
     v,
     r,
     s,

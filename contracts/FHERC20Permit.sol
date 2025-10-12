@@ -21,7 +21,7 @@ import { FHE, Utils, euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/
 
 abstract contract FHERC20Permit is FHERC20, IFHERC20Permit, EIP712, Nonces {
     bytes32 internal constant PERMIT_TYPEHASH =
-        keccak256("Permit(address owner,address spender,uint48 until, uint256 nonce,uint256 deadline)");
+        keccak256("Permit(address owner,address spender,uint48 until,uint256 nonce,uint256 deadline)");
 
     /**
      * @dev Permit deadline has expired.
