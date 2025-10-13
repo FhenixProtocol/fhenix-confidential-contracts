@@ -79,7 +79,7 @@ describe("FHERC20Wrapper", function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
       expect(await eBTC.totalSupply()).to.equal(0, "Total indicated supply init 0");
-      expect(await eBTC.encTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
+      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
 
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);
@@ -102,7 +102,7 @@ describe("FHERC20Wrapper", function () {
         await ticksToIndicated(eBTC, 5001n),
         "Total indicated supply increases",
       );
-      await hre.cofhe.mocks.expectPlaintext(await eBTC.encTotalSupply(), transferValue);
+      await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), transferValue);
 
       // 2nd TX, indicated + 1, true + 1e8
 
@@ -121,7 +121,7 @@ describe("FHERC20Wrapper", function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
       expect(await eBTC.totalSupply()).to.equal(0, "Total supply init 0");
-      expect(await eBTC.encTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
+      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
 
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);
@@ -185,13 +185,13 @@ describe("FHERC20Wrapper", function () {
         await ticksToIndicated(eBTC, 5000n),
         "Total indicated supply decreases",
       );
-      await hre.cofhe.mocks.expectPlaintext(await eBTC.encTotalSupply(), mintValue - transferValue);
+      await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), mintValue - transferValue);
     });
     it("Should claim all unwrapped amounts", async function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
       expect(await eBTC.totalSupply()).to.equal(0, "Total supply init 0");
-      expect(await eBTC.encTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
+      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
 
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);

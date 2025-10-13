@@ -2,13 +2,7 @@ import { expect } from "chai";
 import hre, { ethers } from "hardhat";
 import { FHERC20_Harness } from "../typechain-types";
 import { cofhejs, Encryptable } from "cofhejs/node";
-import {
-  expectFHERC20BalancesChange,
-  prepExpectFHERC20BalancesChange,
-  ticksToIndicated,
-  tick,
-  generateTransferFromPermit,
-} from "./utils";
+import { expectFHERC20BalancesChange, prepExpectFHERC20BalancesChange, ticksToIndicated, tick } from "./utils";
 import { ZeroAddress } from "ethers";
 
 describe("FHERC20", function () {
@@ -79,7 +73,7 @@ describe("FHERC20", function () {
 
       expect(await XFHE.totalSupply()).to.equal(0);
       expect(await ticksToIndicated(XFHE, 0n)).to.equal(0n);
-      expect(await XFHE.encTotalSupply()).to.equal(0n, "Total supply not initialized (hash is 0)");
+      expect(await XFHE.confidentialTotalSupply()).to.equal(0n, "Total supply not initialized (hash is 0)");
 
       // 1st TX, indicated + 5001, true + 1e18
 
@@ -97,7 +91,7 @@ describe("FHERC20", function () {
         await ticksToIndicated(XFHE, 5001n),
         "Total indicated supply increases",
       );
-      await hre.cofhe.mocks.expectPlaintext(await XFHE.encTotalSupply(), value);
+      await hre.cofhe.mocks.expectPlaintext(await XFHE.confidentialTotalSupply(), value);
 
       // 2nd TX, indicated + 1, true + 1e18
 
@@ -136,7 +130,7 @@ describe("FHERC20", function () {
         await ticksToIndicated(XFHE, 5001n),
         "Total indicated supply is 0.5001",
       );
-      await hre.cofhe.mocks.expectPlaintext(await XFHE.encTotalSupply(), mintValue);
+      await hre.cofhe.mocks.expectPlaintext(await XFHE.confidentialTotalSupply(), mintValue);
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
 
@@ -145,7 +139,7 @@ describe("FHERC20", function () {
         .withArgs(bob.address, ZeroAddress, await tick(XFHE));
 
       await expectFHERC20BalancesChange(XFHE, bob.address, -1n * (await ticksToIndicated(XFHE, 1n)), -1n * burnValue);
-      await hre.cofhe.mocks.expectPlaintext(await XFHE.encTotalSupply(), mintValue - burnValue);
+      await hre.cofhe.mocks.expectPlaintext(await XFHE.confidentialTotalSupply(), mintValue - burnValue);
 
       expect(await XFHE.totalSupply()).to.equal(
         await ticksToIndicated(XFHE, 5000n),
@@ -231,7 +225,7 @@ describe("FHERC20", function () {
 
       // Encrypt transfer value
       const transferValueRaw = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint128(transferValueRaw)] as const);
+      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValueRaw)] as const);
       const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
 
       // encTransfer
@@ -240,7 +234,7 @@ describe("FHERC20", function () {
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
 
       await expect(
-        XFHE.connect(bob)["encTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, encTransferInput),
+        XFHE.connect(bob)["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, encTransferInput),
       )
         .to.emit(XFHE, "Transfer")
         .withArgs(bob.address, alice.address, await tick(XFHE));
@@ -264,17 +258,59 @@ describe("FHERC20", function () {
 
       // Encrypt transfer value
       const transferValueRaw = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint128(transferValueRaw)] as const);
+      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValueRaw)] as const);
       const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
 
       // encTransfer (reverts)
       await expect(
-        XFHE.connect(bob)["encTransfer(address,(uint256,uint8,uint8,bytes))"](ZeroAddress, encTransferInput),
+        XFHE.connect(bob)["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](ZeroAddress, encTransferInput),
       ).to.be.revertedWithCustomError(XFHE, "ERC20InvalidReceiver");
     });
   });
 
-  describe("encTransferFrom", function () {
+  describe("operator management", function () {
+    it("Should return true when operator is set", async function () {
+      const { XFHE, bob, alice } = await setupFixture();
+
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(true);
+    });
+
+    it("Should return false when operator is not set", async function () {
+      const { XFHE, bob, alice } = await setupFixture();
+
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(false);
+    });
+
+    it("Should return false when operator has expired", async function () {
+      const { XFHE, bob, alice } = await setupFixture();
+
+      // Set operator with past timestamp
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp - 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(false);
+    });
+
+    it("Should remove operator when setting timestamp to 0", async function () {
+      const { XFHE, bob, alice } = await setupFixture();
+
+      // Set operator
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(true);
+
+      // Remove operator
+      await XFHE.connect(bob).setOperator(alice.address, 0);
+
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(false);
+    });
+  });
+
+  describe("confidentialTransferFrom", function () {
     const setupEncTransferFromFixture = async () => {
       const { XFHE, bob, alice, eve } = await setupFixture();
 
@@ -284,7 +320,7 @@ describe("FHERC20", function () {
 
       // Encrypt transfer value
       const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint128(transferValue)] as const);
+      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
       const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
 
       return { XFHE, bob, alice, eve, encTransferInput, transferValue };
@@ -293,21 +329,22 @@ describe("FHERC20", function () {
     it("Should transfer from bob to alice", async function () {
       const { XFHE, bob, alice, encTransferInput, transferValue } = await setupEncTransferFromFixture();
 
-      // Generate encTransferFrom permit
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-      });
-
       // Success - Bob -> Alice
+
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
 
-      await expect(XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit))
+      await expect(
+        XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
+          bob.address,
+          alice.address,
+          encTransferInput,
+        ),
+      )
         .to.emit(XFHE, "Transfer")
         .withArgs(bob.address, alice.address, await tick(XFHE));
 
@@ -328,21 +365,22 @@ describe("FHERC20", function () {
     it("Should transfer from bob to alice (eve spender)", async function () {
       const { XFHE, bob, alice, eve, encTransferInput, transferValue } = await setupEncTransferFromFixture();
 
-      // Generate encTransferFrom permit
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: eve.address,
-        valueHash: encTransferInput.ctHash,
-      });
-
       // Success - Bob -> Alice
+
+      // Set eve as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(eve.address, timestamp);
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
 
-      await expect(XFHE.connect(eve).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit))
+      await expect(
+        XFHE.connect(eve)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
+          bob.address,
+          alice.address,
+          encTransferInput,
+        ),
+      )
         .to.emit(XFHE, "Transfer")
         .withArgs(bob.address, alice.address, await tick(XFHE));
 
@@ -371,21 +409,16 @@ describe("FHERC20", function () {
       // Mint to vault (initialize indicator)
       await XFHE.mint(vaultAddress, await ethers.parseEther("1"));
 
-      // Generate encTransferFrom permit
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: vaultAddress,
-        valueHash: encTransferInput.ctHash,
-      });
-
       // Success - Bob -> Vault
+
+      // Set vault as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(vaultAddress, timestamp);
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, vaultAddress);
 
-      await expect(Vault.connect(bob).deposit(encTransferInput, permit))
+      await expect(Vault.connect(bob).deposit(encTransferInput))
         .to.emit(XFHE, "Transfer")
         .withArgs(bob.address, vaultAddress, await tick(XFHE));
 
@@ -406,149 +439,332 @@ describe("FHERC20", function () {
     it("Should revert if invalid receiver", async function () {
       const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
 
-      // Generate encTransferFrom permit
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-      });
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
 
       await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, ZeroAddress, encTransferInput, permit),
+        XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
+          bob.address,
+          ZeroAddress,
+          encTransferInput,
+        ),
       ).to.be.revertedWithCustomError(XFHE, "ERC20InvalidReceiver");
-    });
-
-    it("Should revert if permit expired", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
-
-      // Deadline passed - ERC2612ExpiredSignature
-
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-        nonce: await XFHE.nonces(bob),
-        deadline: 0n,
-      });
-
-      // Hardhat time travel 1 second
-      await hre.network.provider.send("evm_increaseTime", [1]);
-      await hre.network.provider.send("evm_mine");
-
-      // Get hardhat timestamp
-      const latestBlock = await ethers.provider.getBlock("latest");
-      const timestamp = latestBlock?.timestamp;
-      expect(timestamp).to.be.greaterThan(permit.deadline);
-
-      // Expect revert
-      await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "ERC2612ExpiredSignature");
-    });
-
-    it("Should revert on owner mismatch", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
-
-      // FHERC20EncTransferFromOwnerMismatch bob -> alice
-
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: alice.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-      });
-
-      // Expect revert
-
-      await expect(
-        XFHE.connect(bob).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "FHERC20EncTransferFromOwnerMismatch");
     });
 
     it("Should revert on spender mismatch", async function () {
       const { XFHE, bob, alice, eve, encTransferInput } = await setupEncTransferFromFixture();
 
-      // FHERC20EncTransferFromSpenderMismatch
+      // FHERC20ConfidentialTransferFromSpenderMismatch
 
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: eve.address,
-        valueHash: encTransferInput.ctHash,
-      });
+      // Set eve as operator for bob (not alice)
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(eve.address, timestamp);
 
       // Expect revert
 
       await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "FHERC20EncTransferFromSpenderMismatch");
+        XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
+          bob.address,
+          alice.address,
+          encTransferInput,
+        ),
+      ).to.be.revertedWithCustomError(XFHE, "FHERC20UnauthorizedSpender");
+    });
+  });
+
+  describe("confidentialTransferAndCall", function () {
+    const setupTransferAndCallFixture = async () => {
+      const { XFHE, bob, alice, eve } = await setupFixture();
+
+      const mintValue = ethers.parseEther("10");
+      await XFHE.mint(bob, mintValue);
+
+      // Deploy receiver contract
+      const receiverFactory = await ethers.getContractFactory("MockFHERC20Receiver");
+      const receiver = await receiverFactory.deploy();
+      await receiver.waitForDeployment();
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
+      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+
+      return { XFHE, bob, alice, eve, receiver, encTransferInput, transferValue };
+    };
+
+    it("Should transfer with callback to receiver (success)", async function () {
+      const { XFHE, bob, receiver, encTransferInput, transferValue } = await setupTransferAndCallFixture();
+
+      const receiverAddress = await receiver.getAddress();
+
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, receiverAddress);
+
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [1]);
+
+      const tx = await XFHE.connect(bob)["confidentialTransferAndCall(address,(uint256,uint8,uint8,bytes),bytes)"](
+        receiverAddress,
+        encTransferInput,
+        callData,
+      );
+
+      await expect(tx)
+        .to.emit(XFHE, "Transfer")
+        .withArgs(bob.address, receiverAddress, await tick(XFHE))
+        .to.emit(XFHE, "Transfer")
+        .withArgs(receiverAddress, bob.address, await tick(XFHE))
+        .to.emit(receiver, "ConfidentialTransferCallback")
+        .withArgs(true);
+
+      // 2 Transfer events for confidentiality (initial + refund of 0)
+      // Bob: -1 tick (send) +1 tick (refund of 0) = 0 indicated change
+      // Receiver: +1 tick (receive) -1 tick (refund of 0) = 0 indicated change (but started at 0, so now at 5000)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, -1n * transferValue);
+      await expectFHERC20BalancesChange(XFHE, receiverAddress, await ticksToIndicated(XFHE, 5000n), 1n * transferValue);
     });
 
-    it("Should revert on value_hash mismatch", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
+    it("Should transfer with callback to receiver (failure)", async function () {
+      const { XFHE, bob, receiver, encTransferInput } = await setupTransferAndCallFixture();
 
-      // FHERC20EncTransferFromValueHashMismatch
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, await receiver.getAddress());
 
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash + 1000000000n,
-      });
-
-      // Expect revert
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [0]);
 
       await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "FHERC20EncTransferFromValueHashMismatch");
+        XFHE.connect(bob)["confidentialTransferAndCall(address,(uint256,uint8,uint8,bytes),bytes)"](
+          await receiver.getAddress(),
+          encTransferInput,
+          callData,
+        ),
+      ).to.emit(receiver, "ConfidentialTransferCallback");
+
+      // Transfer should be reverted, encrypted balances unchanged
+      // But indicated balances change due to transfer + refund (for confidentiality)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, 0n);
+      await expectFHERC20BalancesChange(XFHE, await receiver.getAddress(), await ticksToIndicated(XFHE, 5000n), 0n);
     });
 
-    it("Should revert on signer not owner", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
+    it("Should transfer with callback to EOA", async function () {
+      const { XFHE, bob, alice, encTransferInput, transferValue } = await setupTransferAndCallFixture();
 
-      // Signer != owner - ERC2612InvalidSigner
+      await XFHE.mint(alice, ethers.parseEther("1")); // Initialize alice's balance
 
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: alice,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-      });
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, alice.address);
 
-      // Expect revert
+      const callData = "0x";
 
-      await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "ERC2612InvalidSigner");
+      const tx = await XFHE.connect(bob)["confidentialTransferAndCall(address,(uint256,uint8,uint8,bytes),bytes)"](
+        alice.address,
+        encTransferInput,
+        callData,
+      );
+
+      await expect(tx)
+        .to.emit(XFHE, "Transfer")
+        .withArgs(bob.address, alice.address, await tick(XFHE))
+        .to.emit(XFHE, "Transfer")
+        .withArgs(alice.address, bob.address, await tick(XFHE));
+
+      // 2 Transfer events for confidentiality (initial + refund of 0)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, -1n * transferValue);
+      await expectFHERC20BalancesChange(XFHE, alice.address, 0n, 1n * transferValue);
     });
 
-    it("Should revert on invalid nonce", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
+    it("Should revert with custom error from callback", async function () {
+      const { XFHE, bob, receiver, encTransferInput } = await setupTransferAndCallFixture();
 
-      // Invalid nonce - ERC2612InvalidSigner
-
-      const permit = await generateTransferFromPermit({
-        token: XFHE,
-        signer: bob,
-        owner: bob.address,
-        spender: alice.address,
-        valueHash: encTransferInput.ctHash,
-        nonce: (await XFHE.nonces(bob)) + 1n,
-      });
-
-      // Expect revert
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [2]);
 
       await expect(
-        XFHE.connect(alice).encTransferFromDirect(bob.address, alice.address, encTransferInput, permit),
-      ).to.be.revertedWithCustomError(XFHE, "ERC2612InvalidSigner");
+        XFHE.connect(bob)["confidentialTransferAndCall(address,(uint256,uint8,uint8,bytes),bytes)"](
+          await receiver.getAddress(),
+          encTransferInput,
+          callData,
+        ),
+      )
+        .to.be.revertedWithCustomError(receiver, "InvalidInput")
+        .withArgs(2);
+    });
+
+    it("Should revert on transfer to zero address", async function () {
+      const { XFHE, bob, encTransferInput } = await setupTransferAndCallFixture();
+
+      await expect(
+        XFHE.connect(bob)["confidentialTransferAndCall(address,(uint256,uint8,uint8,bytes),bytes)"](
+          ZeroAddress,
+          encTransferInput,
+          "0x",
+        ),
+      ).to.be.revertedWithCustomError(XFHE, "ERC20InvalidReceiver");
+    });
+  });
+
+  describe("confidentialTransferFromAndCall", function () {
+    const setupTransferFromAndCallFixture = async () => {
+      const { XFHE, bob, alice, eve } = await setupFixture();
+
+      const mintValue = ethers.parseEther("10");
+      await XFHE.mint(bob, mintValue);
+      await XFHE.mint(alice, mintValue);
+
+      // Deploy receiver contract
+      const receiverFactory = await ethers.getContractFactory("MockFHERC20Receiver");
+      const receiver = await receiverFactory.deploy();
+      await receiver.waitForDeployment();
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
+      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+
+      return { XFHE, bob, alice, eve, receiver, encTransferInput, transferValue };
+    };
+
+    it("Should transfer from bob to receiver with callback (as operator)", async function () {
+      const { XFHE, bob, alice, receiver, encTransferInput, transferValue } = await setupTransferFromAndCallFixture();
+
+      const receiverAddress = await receiver.getAddress();
+
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, receiverAddress);
+
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [1]);
+
+      const tx = await XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+        bob.address,
+        receiverAddress,
+        encTransferInput,
+        callData,
+      );
+
+      await expect(tx)
+        .to.emit(XFHE, "Transfer")
+        .withArgs(bob.address, receiverAddress, await tick(XFHE))
+        .to.emit(XFHE, "Transfer")
+        .withArgs(receiverAddress, bob.address, await tick(XFHE))
+        .to.emit(receiver, "ConfidentialTransferCallback")
+        .withArgs(true);
+
+      // 2 Transfer events for confidentiality (initial + refund of 0)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, -1n * transferValue);
+      await expectFHERC20BalancesChange(XFHE, receiverAddress, await ticksToIndicated(XFHE, 5000n), 1n * transferValue);
+    });
+
+    it("Should transfer from bob to receiver with callback (failure)", async function () {
+      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, await receiver.getAddress());
+
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [0]);
+
+      await expect(
+        XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+          bob.address,
+          await receiver.getAddress(),
+          encTransferInput,
+          callData,
+        ),
+      ).to.emit(receiver, "ConfidentialTransferCallback");
+
+      // Transfer should be reverted, encrypted balances unchanged
+      // But indicated balances change due to transfer + refund (for confidentiality)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, 0n);
+      await expectFHERC20BalancesChange(XFHE, await receiver.getAddress(), await ticksToIndicated(XFHE, 5000n), 0n);
+    });
+
+    it("Should transfer from bob to alice (EOA) with callback", async function () {
+      const { XFHE, bob, alice, eve, encTransferInput, transferValue } = await setupTransferFromAndCallFixture();
+
+      // Set eve as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(eve.address, timestamp);
+
+      await prepExpectFHERC20BalancesChange(XFHE, bob.address);
+      await prepExpectFHERC20BalancesChange(XFHE, alice.address);
+
+      const callData = "0x";
+
+      const tx = await XFHE.connect(eve)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+        bob.address,
+        alice.address,
+        encTransferInput,
+        callData,
+      );
+
+      await expect(tx)
+        .to.emit(XFHE, "Transfer")
+        .withArgs(bob.address, alice.address, await tick(XFHE))
+        .to.emit(XFHE, "Transfer")
+        .withArgs(alice.address, bob.address, await tick(XFHE));
+
+      // 2 Transfer events for confidentiality (initial + refund of 0)
+      await expectFHERC20BalancesChange(XFHE, bob.address, 0n, -1n * transferValue);
+      await expectFHERC20BalancesChange(XFHE, alice.address, 0n, 1n * transferValue);
+    });
+
+    it("Should revert without operator approval", async function () {
+      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [1]);
+
+      await expect(
+        XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+          bob.address,
+          await receiver.getAddress(),
+          encTransferInput,
+          callData,
+        ),
+      ).to.be.revertedWithCustomError(XFHE, "FHERC20UnauthorizedSpender");
+    });
+
+    it("Should revert with custom error from callback", async function () {
+      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [2]);
+
+      await expect(
+        XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+          bob.address,
+          await receiver.getAddress(),
+          encTransferInput,
+          callData,
+        ),
+      )
+        .to.be.revertedWithCustomError(receiver, "InvalidInput")
+        .withArgs(2);
+    });
+
+    it("Should revert on transfer to zero address", async function () {
+      const { XFHE, bob, alice, encTransferInput } = await setupTransferFromAndCallFixture();
+
+      // Set alice as operator for bob
+      const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
+      await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      await expect(
+        XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
+          bob.address,
+          ZeroAddress,
+          encTransferInput,
+          "0x",
+        ),
+      ).to.be.revertedWithCustomError(XFHE, "ERC20InvalidReceiver");
     });
   });
 });

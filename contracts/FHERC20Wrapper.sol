@@ -6,7 +6,7 @@ pragma solidity ^0.8.25;
 import { IERC20, IERC20Metadata, ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { euint128, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { euint64, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IFHERC20, FHERC20 } from "./FHERC20.sol";
 import { FHERC20UnwrapClaim } from "./FHERC20UnwrapClaim.sol";
 
@@ -16,9 +16,9 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
     IERC20 private immutable _erc20;
     string private _symbol;
 
-    event WrappedERC20(address indexed from, address indexed to, uint128 value);
-    event UnwrappedERC20(address indexed from, address indexed to, uint128 value);
-    event ClaimedUnwrappedERC20(address indexed from, address indexed to, uint128 value);
+    event WrappedERC20(address indexed from, address indexed to, uint64 value);
+    event UnwrappedERC20(address indexed from, address indexed to, uint64 value);
+    event ClaimedUnwrappedERC20(address indexed from, address indexed to, uint64 value);
     event SymbolUpdated(string symbol);
 
     /**
@@ -75,16 +75,16 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
         return _erc20;
     }
 
-    function wrap(address to, uint128 value) public {
+    function wrap(address to, uint64 value) public {
         if (to == address(0)) to = msg.sender;
         _erc20.safeTransferFrom(msg.sender, address(this), value);
         _mint(to, value);
         emit WrappedERC20(msg.sender, to, value);
     }
 
-    function unwrap(address to, uint128 value) public {
+    function unwrap(address to, uint64 value) public {
         if (to == address(0)) to = msg.sender;
-        euint128 burned = _burn(msg.sender, value);
+        euint64 burned = _burn(msg.sender, value);
         FHE.decrypt(burned);
         _createClaim(to, value, burned);
         emit UnwrappedERC20(msg.sender, to, value);

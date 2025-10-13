@@ -3,6 +3,7 @@
 pragma solidity ^0.8.25;
 
 import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 /**
  * @dev Standard FHERC-20 Errors
@@ -15,37 +16,40 @@ interface IFHERC20Errors is IERC20Errors {
      */
     error FHERC20IncompatibleFunction();
 
+    /// @dev The given receiver `receiver` is invalid for transfers.
+    error FHERC20InvalidReceiver(address receiver);
+
     /**
-     * @dev encTransferFrom `from` and `permit.owner` don't match
-     * @param from encTransferFrom param.
+     * @dev ConfidentialTransferFrom `from` and `permit.owner` don't match
+     * @param from ConfidentialTransferFrom param.
      * @param permitOwner token owner included in FHERC20_EIP712_Permit struct.
      */
-    error FHERC20EncTransferFromOwnerMismatch(address from, address permitOwner);
+    error FHERC20ConfidentialTransferFromOwnerMismatch(address from, address permitOwner);
 
     /**
-     * @dev encTransferFrom `to` and `permit.spender` don't match
-     * @param to encTransferFrom param.
+     * @dev The caller `owner` does not have access to the encrypted value `value`.
+     *
+     */
+    error FHERC20UnauthorizedUseOfEncryptedAmount(euint64 value, address owner);
+
+    /**
+     * @dev ConfidentialTransferFrom `from` and `permit.owner` don't match
+     * @param from ConfidentialTransferFrom param.
+     * @param spender operator authorized to spent tokens from.
+     */
+    error FHERC20UnauthorizedSpender(address from, address spender);
+
+    /**
+     * @dev ConfidentialTransferFrom `to` and `permit.spender` don't match
+     * @param to ConfidentialTransferFrom param.
      * @param permitSpender token receiver included in FHERC20_EIP712_Permit struct.
      */
-    error FHERC20EncTransferFromSpenderMismatch(address to, address permitSpender);
+    error FHERC20ConfidentialTransferFromSpenderMismatch(address to, address permitSpender);
 
     /**
-     * @dev encTransferFrom `value` greater than `permit.value_hash` dont match (permit doesn't match InEuint128)
-     * @param inValueHash encTransferFrom param inValue.ctHash.
+     * @dev ConfidentialTransferFrom `value` greater than `permit.value_hash` dont match (permit doesn't match InEuint64)
+     * @param inValueHash ConfidentialTransferFrom param inValue.ctHash.
      * @param permitValueHash token amount hash included in FHERC20_EIP712_Permit struct.
      */
-    error FHERC20EncTransferFromValueHashMismatch(uint256 inValueHash, uint256 permitValueHash);
-
-    /**
-     * @dev Permit deadline has expired.
-     * @param deadline Expired deadline of the FHERC20_EIP712_Permit.
-     */
-    error ERC2612ExpiredSignature(uint256 deadline);
-
-    /**
-     * @dev Mismatched signature.
-     * @param signer ECDSA recovered signer of the FHERC20_EIP712_Permit.
-     * @param owner Owner passed in as part of the FHERC20_EIP712_Permit struct.
-     */
-    error ERC2612InvalidSigner(address signer, address owner);
+    error FHERC20ConfidentialTransferFromValueHashMismatch(uint256 inValueHash, uint256 permitValueHash);
 }

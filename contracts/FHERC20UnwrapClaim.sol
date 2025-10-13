@@ -7,7 +7,7 @@ import { IERC20, IERC20Metadata, ERC20 } from "@openzeppelin/contracts/token/ERC
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { euint128, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { euint64, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IFHERC20, FHERC20 } from "./FHERC20.sol";
 
 abstract contract FHERC20UnwrapClaim {
@@ -15,8 +15,8 @@ abstract contract FHERC20UnwrapClaim {
 
     struct Claim {
         uint256 ctHash;
-        uint128 requestedAmount;
-        uint128 decryptedAmount;
+        uint64 requestedAmount;
+        uint64 decryptedAmount;
         bool decrypted;
         address to;
         bool claimed;
@@ -28,16 +28,16 @@ abstract contract FHERC20UnwrapClaim {
     error ClaimNotFound();
     error AlreadyClaimed();
 
-    function _createClaim(address to, uint128 value, euint128 claimable) internal {
-        _claims[euint128.unwrap(claimable)] = Claim({
-            ctHash: euint128.unwrap(claimable),
+    function _createClaim(address to, uint64 value, euint64 claimable) internal {
+        _claims[euint64.unwrap(claimable)] = Claim({
+            ctHash: euint64.unwrap(claimable),
             requestedAmount: value,
             decryptedAmount: 0,
             decrypted: false,
             to: to,
             claimed: false
         });
-        _userClaims[to].add(euint128.unwrap(claimable));
+        _userClaims[to].add(euint64.unwrap(claimable));
     }
 
     function _handleClaim(uint256 ctHash) internal returns (Claim memory claim) {
@@ -48,7 +48,7 @@ abstract contract FHERC20UnwrapClaim {
         if (claim.claimed) revert AlreadyClaimed();
 
         // Get the decrypted amount (reverts if the amount is not decrypted yet)
-        uint128 amount = SafeCast.toUint128(FHE.getDecryptResult(ctHash));
+        uint64 amount = SafeCast.toUint64(FHE.getDecryptResult(ctHash));
 
         // Update the claim
         claim.decryptedAmount = amount;
@@ -74,7 +74,7 @@ abstract contract FHERC20UnwrapClaim {
     function getClaim(uint256 ctHash) public view returns (Claim memory) {
         Claim memory _claim = _claims[ctHash];
         (uint256 amount, bool decrypted) = FHE.getDecryptResultSafe(ctHash);
-        _claim.decryptedAmount = SafeCast.toUint128(amount);
+        _claim.decryptedAmount = SafeCast.toUint64(amount);
         _claim.decrypted = decrypted;
         return _claim;
     }
@@ -85,7 +85,7 @@ abstract contract FHERC20UnwrapClaim {
         for (uint256 i = 0; i < ctHashes.length; i++) {
             userClaims[i] = _claims[ctHashes[i]];
             (uint256 amount, bool decrypted) = FHE.getDecryptResultSafe(ctHashes[i]);
-            userClaims[i].decryptedAmount = SafeCast.toUint128(amount);
+            userClaims[i].decryptedAmount = SafeCast.toUint64(amount);
             userClaims[i].decrypted = decrypted;
         }
         return userClaims;

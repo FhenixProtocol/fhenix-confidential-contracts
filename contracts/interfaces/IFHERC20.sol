@@ -5,7 +5,7 @@ pragma solidity ^0.8.25;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { euint128, InEuint128 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -30,25 +30,18 @@ import { euint128, InEuint128 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
  */
 interface IFHERC20 is IERC20, IERC20Metadata {
     /**
-     * @dev EIP712 Permit reusable struct
-     */
-    struct FHERC20_EIP712_Permit {
-        address owner;
-        address spender;
-        uint256 value_hash;
-        uint256 deadline;
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-    }
-
-    /**
      * @dev Emitted when `value_hash` encrypted tokens are moved from one account (`from`) to
      * another (`to`).
      *
      * Note that `value` may be zero.
      */
-    event EncTransfer(address indexed from, address indexed to, uint256 value_hash);
+    event ConfidentialTransfer(address indexed from, address indexed to, uint256 value_hash);
+
+    /**
+     * @dev Emitted when the expiration timestamp for an operator `operator` is updated for a given `holder`.
+     * The operator may move any amount of tokens on behalf of the holder until the timestamp `until`.
+     */
+    event OperatorSet(address indexed holder, address indexed operator, uint48 until);
 
     /**
      * @dev Returns true if the token is a FHERC20.
@@ -87,6 +80,11 @@ interface IFHERC20 is IERC20, IERC20Metadata {
     function totalSupply() external view returns (uint256);
 
     /**
+     * @dev Returns the encrypted total supply.
+     */
+    function confidentialTotalSupply() external view returns (euint64);
+
+    /**
      * @dev Returns an flag indicating that the external balances returned by
      * `balanceOf` is an indication of the underlying encrypted balance.
      * The value returned is between 0.0000 and 0.9999, and
@@ -117,28 +115,62 @@ interface IFHERC20 is IERC20, IERC20Metadata {
     /**
      * @dev See {IERC20-balanceOf}.
      *
-     * Returns the euint128 representing the account's true balance (encrypted)
+     * Returns the euint64 representing the account's true balance (encrypted)
      */
-    function encBalanceOf(address account) external view returns (euint128);
+    function confidentialBalanceOf(address account) external view returns (euint64);
+
+    /**
+     * @dev Returns true if `spender` is currently an operator for `holder`.
+     */
+    function isOperator(address holder, address spender) external view returns (bool);
+
+    /**
+     * @dev Sets `operator` as an operator for `holder` until the timestamp `until`.
+     *
+     * NOTE: An operator may transfer any amount of tokens on behalf of a holder while approved.
+     */
+    function setOperator(address operator, uint48 until) external;
 
     /**
      * @dev See {IERC20-transfer}.
      * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20
      */
-    function transfer(address, uint256) external pure returns (bool);
+    function transfer(address to, uint256 value) external pure returns (bool);
+
+    /**
+     * @dev See {IERC20-allowance}.
+     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20.
+     * Allowances have been removed from FHERC20s to prevent encrypted balance leakage.
+     * Allowances have been replaced with an EIP712 permit for each `confidentialTransferFrom`.
+     */
+    function allowance(address owner, address spender) external pure returns (uint256);
+
+    /**
+     * @dev See {IERC20-approve}.
+     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20.
+     * Allowances have been removed from FHERC20s to prevent encrypted balance leakage.
+     * Allowances have been replaced with an EIP712 permit for each `confidentialTransferFrom`.
+     */
+    function approve(address spender, uint256 value) external pure returns (bool);
+
+    /**
+     * @dev See {IERC20-transferFrom}.
+     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20
+     */
+    function transferFrom(address from, address to, uint256 value) external pure returns (bool);
 
     /**
      * @dev See {IERC20-transfer}.
      *
-     * Intended to be used as a EOA call with an encrypted input `InEuint128 inValue`.
+     * Intended to be used as a EOA call with an encrypted input `InEuint64 inValue`.
      *
      * Requirements:
      *
      * - `to` cannot be the zero address.
      * - the caller must have a balance of at least `value`.
-     * - `inValue` must be a `InEuint128` to preserve confidentiality.
+     * - `inValue` must be a `InEuint164` to preserve confidentiality.
      */
-    function encTransfer(address to, InEuint128 memory inValue) external returns (euint128 transferred);
+    function confidentialTransfer(address to, InEuint64 memory inValue) external returns (euint64 transferred);
 
     /**
      * @dev See {IERC20-transfer}.
@@ -150,31 +182,9 @@ interface IFHERC20 is IERC20, IERC20Metadata {
      *
      * - `to` cannot be the zero address.
      * - the caller must have a balance of at least `value`.
-     * - `value` must be a `euint128` to preserve confidentiality.
+     * - `value` must be a `euint64` to preserve confidentiality.
      */
-    function encTransfer(address to, euint128 value) external returns (euint128 transferred);
-
-    /**
-     * @dev See {IERC20-allowance}.
-     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20.
-     * Allowances have been removed from FHERC20s to prevent encrypted balance leakage.
-     * Allowances have been replaced with an EIP712 permit for each `encTransferFrom`.
-     */
-    function allowance(address, address) external pure returns (uint256);
-
-    /**
-     * @dev See {IERC20-approve}.
-     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20.
-     * Allowances have been removed from FHERC20s to prevent encrypted balance leakage.
-     * Allowances have been replaced with an EIP712 permit for each `encTransferFrom`.
-     */
-    function approve(address, uint256) external pure returns (bool);
-
-    /**
-     * @dev See {IERC20-transferFrom}.
-     * Always reverts to prevent FHERC20 from being unintentionally treated as an ERC20
-     */
-    function transferFrom(address, address, uint256) external pure returns (bool);
+    function confidentialTransfer(address to, euint64 value) external returns (euint64 transferred);
 
     /**
      * @dev See {IERC20-transferFrom}.
@@ -186,49 +196,37 @@ interface IFHERC20 is IERC20, IERC20Metadata {
      * - the caller must have allowance for ``from``'s tokens of at least
      * `value`.
      */
-    function encTransferFromDirect(
+    function confidentialTransferFrom(
         address from,
         address to,
-        InEuint128 memory inValue,
-        FHERC20_EIP712_Permit calldata permit
-    ) external returns (euint128 transferred);
+        InEuint64 memory inValues
+    ) external returns (euint64 transferred);
 
-    function encTransferFromDirectWithMax(
+    function confidentialTransferFrom(address from, address to, euint64 value) external returns (euint64 transferred);
+
+    function confidentialTransferAndCall(
+        address to,
+        InEuint64 memory inValue,
+        bytes calldata data
+    ) external returns (euint64 transferred);
+
+    function confidentialTransferAndCall(
+        address to,
+        euint64 value,
+        bytes calldata data
+    ) external returns (euint64 transferred);
+
+    function confidentialTransferFromAndCall(
         address from,
         address to,
-        euint128 value,
-        InEuint128 memory inValue,
-        FHERC20_EIP712_Permit calldata permit
-    ) external returns (euint128 transferred);
+        InEuint64 memory inValue,
+        bytes calldata data
+    ) external returns (euint64 transferred);
 
-    function encTransferFrom(
+    function confidentialTransferFromAndCall(
         address from,
         address to,
-        euint128 value,
-        FHERC20_EIP712_Permit calldata permit
-    ) external returns (euint128 transferred);
-
-    function encTransferFromWithMax(
-        address from,
-        address to,
-        euint128 value,
-        euint128 maxValue,
-        FHERC20_EIP712_Permit calldata permit
-    ) external returns (euint128 transferred);
-
-    // EIP712 Permit
-
-    /**
-     * @dev Returns the current nonce for `owner`. This value must be
-     * included whenever a signature is generated for {permit}.
-     *
-     * Every successful call to {permit} increases ``owner``'s nonce by one. This
-     * prevents a signature from being used multiple times.
-     */
-    function nonces(address owner) external view returns (uint256);
-    /**
-     * @dev Returns the domain separator used in the encoding of the signature for {permit}, as defined by {EIP712}.
-     */
-    // solhint-disable-next-line func-name-mixedcase
-    function DOMAIN_SEPARATOR() external view returns (bytes32);
+        euint64 value,
+        bytes calldata data
+    ) external returns (euint64 transferred);
 }
