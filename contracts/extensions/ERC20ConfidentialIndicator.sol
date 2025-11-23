@@ -59,15 +59,22 @@ contract ERC20ConfidentialIndicator is ERC20 {
         return 10110000000 + _indicatedBalances[account];
     }
 
-    function _incrementIndicatedBalance(address account) internal view returns (uint256) {
-        if (_indicatedBalances[account] == 9999) return 9999;
-        if (_indicatedBalances[account] == 0) return 5001;
-        return _indicatedBalances[account] + 1;
+    function _incrementIndicatedBalance(address account) internal returns (uint256) {
+        if (_indicatedBalances[account] == 0) {
+            _indicatedBalances[account] = 5001;
+        } else if (_indicatedBalances[account] != 9999) {
+            _indicatedBalances[account] += 1;
+        }
+        return _indicatedBalances[account];
     }
-    function _decrementIndicatedBalance(address account) internal view returns (uint256) {
-        if (_indicatedBalances[account] == 0) return 4999;
-        if (_indicatedBalances[account] == 1) return 1;
-        return _indicatedBalances[account] - 1;
+
+    function _decrementIndicatedBalance(address account) internal returns (uint256) {
+        if (_indicatedBalances[account] == 0) {
+            _indicatedBalances[account] = 4999;
+        } else if (_indicatedBalances[account] != 1) {
+            _indicatedBalances[account] -= 1;
+        }
+        return _indicatedBalances[account];
     }
 
     function emitConfidentialTransfer(address from, address to) public onlyParent {
