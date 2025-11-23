@@ -77,6 +77,11 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     error UserHasActiveUnwrapClaim();
 
     /**
+     * @dev Amount too small for confidential precision.
+     */
+    error AmountTooSmallForConfidentialPrecision();
+
+    /**
      * @dev Returns the confidential balance of an account (encrypted)
      */
     function confidentialBalanceOf(address account) public view virtual override returns (euint64) {
@@ -91,17 +96,32 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     }
 
     /**
+     * @dev Returns the number of decimals used for the confidential (encrypted) state.
+     * Defaults to 6 to fit safely within euint64.
+     */
+    function confidentialDecimals() public view virtual returns (uint8) {
+        return 6;
+    }
+
+    /**
      * @dev Wrap public tokens to confidential tokens
      * Transfers tokens from the caller's public balance to the confidential pool
      */
-    function wrap(uint64 amount) public virtual override {
-        // Transfer tokens from sender to confidential pool
-        _transfer(msg.sender, CONFIDENTIAL_POOL, amount);
+    function wrap(uint256 amount) public virtual override {
+        uint256 rate = _rate();
 
-        // Update sender's confidential balance
-        _confidentialUpdate(address(0), msg.sender, FHE.asEuint64(amount));
+        uint256 amountToWrap = amount - (amount % rate);
+        if (amountToWrap == 0) {
+            revert AmountTooSmallForConfidentialPrecision();
+        }
 
-        emit TokensWrapped(msg.sender, amount);
+        uint64 amountConfidential = SafeCast.toUint64(amountToWrap / rate);
+
+        _transfer(msg.sender, CONFIDENTIAL_POOL, amountToWrap);
+
+        _confidentialUpdate(address(0), msg.sender, FHE.asEuint64(amountConfidential));
+
+        emit TokensWrapped(msg.sender, amountToWrap);
     }
 
     /**
@@ -128,13 +148,16 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     /**
      * @dev Claim unwrapped tokens after decryption is complete
      */
-    function claimUnwrapped() public virtual {
+    function claimUnwrapped() public virtual override {
         UnwrapClaim memory claim = _handleUnwrapClaim(msg.sender);
 
-        // Transfer tokens from confidential pool to sender
-        _transfer(CONFIDENTIAL_POOL, msg.sender, claim.decryptedAmount);
+        // Scale Up: Private Amount -> Public Amount
+        uint256 amountPublic = uint256(claim.decryptedAmount) * _rate();
 
-        emit UnwrappedTokensClaimed(msg.sender, claim.decryptedAmount);
+        // Transfer tokens from confidential pool to sender
+        _transfer(CONFIDENTIAL_POOL, msg.sender, amountPublic);
+
+        emit UnwrappedTokensClaimed(msg.sender, amountPublic);
     }
 
     /**
@@ -264,6 +287,19 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     function _setOperator(address holder, address operator, uint48 until) internal virtual {
         _operators[holder][operator] = until;
         emit OperatorSet(holder, operator, until);
+    }
+
+    /**
+     * @dev Calculates the conversion rate between public and private decimals.
+     * Example: 18 public vs 6 private = 1e12 rate.
+     */
+    function _rate() internal view virtual returns (uint256) {
+        uint8 pubDec = decimals();
+        uint8 privDec = confidentialDecimals();
+        if (pubDec > privDec) {
+            return 10 ** (pubDec - privDec);
+        }
+        return 1;
     }
 
     /**

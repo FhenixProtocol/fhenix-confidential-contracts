@@ -15,6 +15,11 @@ interface IERC20Confidential {
     function confidentialBalanceOf(address account) external view returns (euint64);
 
     /**
+     * @dev Returns the number of decimals used for the confidential (encrypted) state.
+     */
+    function confidentialDecimals() external view returns (uint8);
+
+    /**
      * @dev Returns true if `spender` is currently an operator for `holder`
      */
     function isOperator(address holder, address spender) external view returns (bool);
@@ -61,7 +66,7 @@ interface IERC20Confidential {
      * @dev Wrap public tokens to confidential tokens
      * @param amount The amount of public tokens to wrap
      */
-    function wrap(uint64 amount) external;
+    function wrap(uint256 amount) external;
 
     /**
      * @dev Unwrap confidential tokens to public tokens
@@ -89,7 +94,7 @@ interface IERC20Confidential {
     /**
      * @dev Emitted when tokens are wrapped (converted from public to confidential)
      */
-    event TokensWrapped(address indexed account, uint64 amount);
+    event TokensWrapped(address indexed account, uint256 amount);
 
     /**
      * @dev Emitted when tokens are unwrapped (converted from confidential to public)
@@ -99,7 +104,7 @@ interface IERC20Confidential {
     /**
      * @dev Emitted when unwrapped tokens are claimed
      */
-    event UnwrappedTokensClaimed(address indexed account, uint64 amount);
+    event UnwrappedTokensClaimed(address indexed account, uint256 amount);
 
     /**
      * @dev Emitted when an operator is set
