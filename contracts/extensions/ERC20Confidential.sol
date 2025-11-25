@@ -15,9 +15,9 @@ import { ERC20ConfidentialIndicator } from "./ERC20ConfidentialIndicator.sol";
  * This contract provides dual-balance functionality:
  * - Standard ERC20 balances and transfers (public)
  * - Confidential balances and transfers (encrypted)
- * - Wrap/unwrap functionality to convert between public and confidential tokens
+ * - Shield/unshield functionality to convert between public and confidential tokens
  *
- * The confidential pool is represented by a fixed address where wrapped tokens are stored.
+ * The confidential pool is represented by a fixed address where shielded tokens are stored.
  */
 abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     // Fixed address representing the confidential token pool (using confidential tag)
@@ -32,8 +32,8 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     // Indicator token for showing confidential activity
     ERC20ConfidentialIndicator public immutable indicatorToken;
 
-    // Unwrap claim system - only one claim per user at a time
-    struct UnwrapClaim {
+    // Unshield claim system - only one claim per user at a time
+    struct UnshieldClaim {
         uint256 ctHash;
         uint64 requestedAmount;
         uint64 decryptedAmount;
@@ -41,7 +41,7 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
         bool claimed;
     }
 
-    mapping(address => UnwrapClaim) private _userUnwrapClaims;
+    mapping(address => UnshieldClaim) private _userUnshieldClaims;
 
     /**
      * @dev Constructor that deploys the indicator token
@@ -62,19 +62,19 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     error ERC20ConfidentialUnauthorizedSpender(address holder, address spender);
 
     /**
-     * @dev Unwrap claim not found.
+     * @dev Unshield claim not found.
      */
-    error UnwrapClaimNotFound();
+    error UnshieldClaimNotFound();
 
     /**
-     * @dev Unwrap claim already claimed.
+     * @dev Unshield claim already claimed.
      */
-    error UnwrapClaimAlreadyClaimed();
+    error UnshieldClaimAlreadyClaimed();
 
     /**
-     * @dev User already has an active unwrap claim.
+     * @dev User already has an active unshield claim.
      */
-    error UserHasActiveUnwrapClaim();
+    error UserHasActiveUnshieldClaim();
 
     /**
      * @dev Amount too small for confidential precision.
@@ -106,34 +106,34 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     }
 
     /**
-     * @dev Wrap public tokens to confidential tokens
+     * @dev Shield public tokens to confidential tokens
      * Transfers tokens from the caller's public balance to the confidential pool
      */
-    function wrap(uint256 amount) public virtual override {
+    function shield(uint256 amount) public virtual override {
         uint256 rate = _rate();
 
-        uint256 amountToWrap = amount - (amount % rate);
-        if (amountToWrap == 0) {
+        uint256 amountToShield = amount - (amount % rate);
+        if (amountToShield == 0) {
             revert AmountTooSmallForConfidentialPrecision();
         }
 
-        uint64 amountConfidential = SafeCast.toUint64(amountToWrap / rate);
+        uint64 amountConfidential = SafeCast.toUint64(amountToShield / rate);
 
-        _transfer(msg.sender, CONFIDENTIAL_POOL, amountToWrap);
+        _transfer(msg.sender, CONFIDENTIAL_POOL, amountToShield);
 
         _confidentialUpdate(address(0), msg.sender, FHE.asEuint64(amountConfidential));
 
-        emit TokensWrapped(msg.sender, amountToWrap);
+        emit TokensShielded(msg.sender, amountToShield);
     }
 
     /**
-     * @dev Unwrap confidential tokens to public tokens
+     * @dev Unshield confidential tokens to public tokens
      * Burns confidential tokens and creates a claim that can be redeemed after decryption
      */
-    function unwrap(uint64 amount) public virtual override {
-        // Check if user already has an active unwrap claim
-        UnwrapClaim memory existingClaim = _userUnwrapClaims[msg.sender];
-        if (existingClaim.ctHash != 0 && !existingClaim.claimed) revert UserHasActiveUnwrapClaim();
+    function unshield(uint64 amount) public virtual override {
+        // Check if user already has an active unshield claim
+        UnshieldClaim memory existingClaim = _userUnshieldClaims[msg.sender];
+        if (existingClaim.ctHash != 0 && !existingClaim.claimed) revert UserHasActiveUnshieldClaim();
 
         // Burn confidential tokens from sender
         euint64 burned = _confidentialUpdate(msg.sender, address(0), FHE.asEuint64(amount));
@@ -141,17 +141,17 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
         // Call FHE.decrypt to initiate decryption
         FHE.decrypt(burned);
 
-        // Create unwrap claim
-        _createUnwrapClaim(msg.sender, amount, burned);
+        // Create unshield claim
+        _createUnshieldClaim(msg.sender, amount, burned);
 
-        emit TokensUnwrapped(msg.sender, euint64.unwrap(burned));
+        emit TokensUnshielded(msg.sender, euint64.unwrap(burned));
     }
 
     /**
-     * @dev Claim unwrapped tokens after decryption is complete
+     * @dev Claim unshielded tokens after decryption is complete
      */
-    function claimUnwrapped() public virtual override {
-        UnwrapClaim memory claim = _handleUnwrapClaim(msg.sender);
+    function claimUnshielded() public virtual override {
+        UnshieldClaim memory claim = _handleUnshieldClaim(msg.sender);
 
         // Scale Up: Private Amount -> Public Amount
         uint256 amountPublic = uint256(claim.decryptedAmount) * _rate();
@@ -159,7 +159,7 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
         // Transfer tokens from confidential pool to sender
         _transfer(CONFIDENTIAL_POOL, msg.sender, amountPublic);
 
-        emit UnwrappedTokensClaimed(msg.sender, amountPublic);
+        emit UnshieldedTokensClaimed(msg.sender, amountPublic);
     }
 
     /**
@@ -304,10 +304,10 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     }
 
     /**
-     * @dev Internal function to create an unwrap claim
+     * @dev Internal function to create an unshield claim
      */
-    function _createUnwrapClaim(address to, uint64 value, euint64 claimable) internal {
-        _userUnwrapClaims[to] = UnwrapClaim({
+    function _createUnshieldClaim(address to, uint64 value, euint64 claimable) internal {
+        _userUnshieldClaims[to] = UnshieldClaim({
             ctHash: euint64.unwrap(claimable),
             requestedAmount: value,
             decryptedAmount: 0,
@@ -317,14 +317,14 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     }
 
     /**
-     * @dev Internal function to handle a user's unwrap claim
+     * @dev Internal function to handle a user's unshield claim
      */
-    function _handleUnwrapClaim(address user) internal returns (UnwrapClaim memory claim) {
-        claim = _userUnwrapClaims[user];
+    function _handleUnshieldClaim(address user) internal returns (UnshieldClaim memory claim) {
+        claim = _userUnshieldClaims[user];
 
         // Check that the claim exists and has not been claimed yet
-        if (claim.ctHash == 0) revert UnwrapClaimNotFound();
-        if (claim.claimed) revert UnwrapClaimAlreadyClaimed();
+        if (claim.ctHash == 0) revert UnshieldClaimNotFound();
+        if (claim.claimed) revert UnshieldClaimAlreadyClaimed();
 
         // Get the decrypted amount (reverts if the amount is not decrypted yet)
         uint64 amount = SafeCast.toUint64(FHE.getDecryptResult(claim.ctHash));
@@ -335,14 +335,14 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
         claim.claimed = true;
 
         // Update the claim in storage
-        _userUnwrapClaims[user] = claim;
+        _userUnshieldClaims[user] = claim;
     }
 
     /**
-     * @dev Get the unwrap claim for a user
+     * @dev Get the unshield claim for a user
      */
-    function getUserUnwrapClaim(address user) public view returns (UnwrapClaim memory) {
-        UnwrapClaim memory claim = _userUnwrapClaims[user];
+    function getUserUnshieldClaim(address user) public view returns (UnshieldClaim memory) {
+        UnshieldClaim memory claim = _userUnshieldClaims[user];
         if (claim.ctHash != 0) {
             (uint256 amount, bool decrypted) = FHE.getDecryptResultSafe(claim.ctHash);
             claim.decryptedAmount = SafeCast.toUint64(amount);

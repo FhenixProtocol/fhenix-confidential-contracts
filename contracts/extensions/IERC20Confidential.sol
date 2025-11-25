@@ -63,16 +63,16 @@ interface IERC20Confidential {
     ) external returns (euint64 transferred);
 
     /**
-     * @dev Wrap public tokens to confidential tokens
-     * @param amount The amount of public tokens to wrap
+     * @dev Shield public tokens to confidential tokens
+     * @param amount The amount of public tokens to shield
      */
-    function wrap(uint256 amount) external;
+    function shield(uint256 amount) external;
 
     /**
-     * @dev Unwrap confidential tokens to public tokens
-     * @param amount The amount of confidential tokens to unwrap
+     * @dev Unshield confidential tokens to public tokens
+     * @param amount The amount of confidential tokens to unshield
      */
-    function unwrap(uint64 amount) external;
+    function unshield(uint64 amount) external;
 
     /**
      * @dev Set an operator for confidential transfers
@@ -82,9 +82,9 @@ interface IERC20Confidential {
     function setOperator(address operator, uint48 until) external;
 
     /**
-     * @dev Claim unwrapped tokens after decryption is complete
+     * @dev Claim unshielded tokens after decryption is complete
      */
-    function claimUnwrapped() external;
+    function claimUnshielded() external;
 
     /**
      * @dev Emitted when confidential tokens are transferred
@@ -92,19 +92,19 @@ interface IERC20Confidential {
     event ConfidentialTransfer(address indexed from, address indexed to, uint256 amountHash);
 
     /**
-     * @dev Emitted when tokens are wrapped (converted from public to confidential)
+     * @dev Emitted when tokens are shielded (converted from public to confidential)
      */
-    event TokensWrapped(address indexed account, uint256 amount);
+    event TokensShielded(address indexed account, uint256 amount);
 
     /**
-     * @dev Emitted when tokens are unwrapped (converted from confidential to public)
+     * @dev Emitted when tokens are unshielded (converted from confidential to public)
      */
-    event TokensUnwrapped(address indexed account, uint256 amountHash);
+    event TokensUnshielded(address indexed account, uint256 amountHash);
 
     /**
-     * @dev Emitted when unwrapped tokens are claimed
+     * @dev Emitted when unshielded tokens are claimed
      */
-    event UnwrappedTokensClaimed(address indexed account, uint256 amount);
+    event UnshieldedTokensClaimed(address indexed account, uint256 amount);
 
     /**
      * @dev Emitted when an operator is set
