@@ -97,10 +97,12 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
 
     /**
      * @dev Returns the number of decimals used for the confidential (encrypted) state.
-     * Defaults to 6 to fit safely within euint64.
+     * If public decimals <= 6, matches public decimals to avoid precision loss.
+     * If public decimals > 6, uses 6 decimals to fit safely within euint64.
      */
     function confidentialDecimals() public view virtual returns (uint8) {
-        return 6;
+        uint8 pubDec = decimals();
+        return pubDec <= 6 ? pubDec : 6;
     }
 
     /**
@@ -295,9 +297,8 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
      */
     function _rate() internal view virtual returns (uint256) {
         uint8 pubDec = decimals();
-        uint8 privDec = confidentialDecimals();
-        if (pubDec > privDec) {
-            return 10 ** (pubDec - privDec);
+        if (pubDec > 6) {
+            return 10 ** (pubDec - 6);
         }
         return 1;
     }

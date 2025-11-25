@@ -7,7 +7,11 @@ import { prepExpectERC20BalancesChange } from "./utils";
 describe("ERC20Confidential", function () {
   async function deployContracts() {
     const MockERC20ConfidentialFactory = await ethers.getContractFactory("MockERC20Confidential");
-    const token = (await MockERC20ConfidentialFactory.deploy("Confidential Token", "CTK")) as MockERC20Confidential;
+    const token = (await MockERC20ConfidentialFactory.deploy(
+      "Confidential Token",
+      "CTK",
+      18,
+    )) as MockERC20Confidential;
     await token.waitForDeployment();
 
     const indicatorAddress = await token.indicatorToken();
@@ -179,6 +183,162 @@ describe("ERC20Confidential", function () {
       // Alice: Initial (0) -> Transfer In (increments to 5001)
       expect(await indicator.balanceOf(bob.address)).to.equal(10110005000n);
       expect(await indicator.balanceOf(alice.address)).to.equal(10110005001n);
+    });
+  });
+
+  describe("Decimal Scenarios", function () {
+    describe("4 Decimals (confidentialDecimals=4, rate=1)", function () {
+      async function deploy4DecimalToken() {
+        const [owner, bob] = await ethers.getSigners();
+        const Factory = await ethers.getContractFactory("MockERC20Confidential");
+        const token = (await Factory.deploy("4Dec Token", "4DEC", 4)) as MockERC20Confidential;
+        await token.waitForDeployment();
+
+        await hre.cofhe.initializeWithHardhatSigner(owner);
+        await hre.cofhe.initializeWithHardhatSigner(bob);
+
+        return { token, bob };
+      }
+
+      it("Should have correct decimals and rate", async function () {
+        const { token } = await deploy4DecimalToken();
+        expect(await token.decimals()).to.equal(4);
+        expect(await token.confidentialDecimals()).to.equal(4);
+      });
+
+      it("Should wrap/unwrap with no precision loss", async function () {
+        const { token, bob } = await deploy4DecimalToken();
+
+        // Mint 10.0000 tokens (4 decimals)
+        const amount = BigInt(100000); // 10 * 10^4
+        await token.mint(bob.address, amount);
+
+        // Wrap
+        await token.connect(bob).wrap(amount);
+
+        // Verify confidential balance (should be same amount, rate=1)
+        const balanceHandle = await token.confidentialBalanceOf(bob.address);
+        await hre.cofhe.mocks.expectPlaintext(balanceHandle, amount);
+
+        // Unwrap
+        await token.connect(bob).unwrap(amount);
+        await hre.network.provider.send("evm_increaseTime", [11]);
+        await hre.network.provider.send("evm_mine");
+
+        // Claim
+        await token.connect(bob).claimUnwrapped();
+
+        // Verify public balance restored
+        expect(await token.balanceOf(bob.address)).to.equal(amount);
+      });
+    });
+
+    describe("6 Decimals (confidentialDecimals=6, rate=1)", function () {
+      async function deploy6DecimalToken() {
+        const [owner, bob] = await ethers.getSigners();
+        const Factory = await ethers.getContractFactory("MockERC20Confidential");
+        const token = (await Factory.deploy("6Dec Token", "6DEC", 6)) as MockERC20Confidential;
+        await token.waitForDeployment();
+
+        await hre.cofhe.initializeWithHardhatSigner(owner);
+        await hre.cofhe.initializeWithHardhatSigner(bob);
+
+        return { token, bob };
+      }
+
+      it("Should have correct decimals and rate", async function () {
+        const { token } = await deploy6DecimalToken();
+        expect(await token.decimals()).to.equal(6);
+        expect(await token.confidentialDecimals()).to.equal(6);
+      });
+
+      it("Should wrap/unwrap with no precision loss", async function () {
+        const { token, bob } = await deploy6DecimalToken();
+
+        // Mint 10.000000 tokens (6 decimals)
+        const amount = BigInt(10000000); // 10 * 10^6
+        await token.mint(bob.address, amount);
+
+        // Wrap
+        await token.connect(bob).wrap(amount);
+
+        // Verify confidential balance (should be same amount, rate=1)
+        const balanceHandle = await token.confidentialBalanceOf(bob.address);
+        await hre.cofhe.mocks.expectPlaintext(balanceHandle, amount);
+
+        // Unwrap
+        await token.connect(bob).unwrap(amount);
+        await hre.network.provider.send("evm_increaseTime", [11]);
+        await hre.network.provider.send("evm_mine");
+
+        // Claim
+        await token.connect(bob).claimUnwrapped();
+
+        // Verify public balance restored
+        expect(await token.balanceOf(bob.address)).to.equal(amount);
+      });
+    });
+
+    describe("8 Decimals (confidentialDecimals=6, rate=100)", function () {
+      async function deploy8DecimalToken() {
+        const [owner, bob] = await ethers.getSigners();
+        const Factory = await ethers.getContractFactory("MockERC20Confidential");
+        const token = (await Factory.deploy("8Dec Token", "8DEC", 8)) as MockERC20Confidential;
+        await token.waitForDeployment();
+
+        await hre.cofhe.initializeWithHardhatSigner(owner);
+        await hre.cofhe.initializeWithHardhatSigner(bob);
+
+        return { token, bob };
+      }
+
+      it("Should have correct decimals and rate", async function () {
+        const { token } = await deploy8DecimalToken();
+        expect(await token.decimals()).to.equal(8);
+        expect(await token.confidentialDecimals()).to.equal(6);
+      });
+
+      it("Should wrap/unwrap with correct rate conversion", async function () {
+        const { token, bob } = await deploy8DecimalToken();
+
+        // Mint 1000000000 (10.00000000 with 8 decimals)
+        const publicAmount = BigInt(1000000000); // 10 * 10^8
+        const expectedConfidentialAmount = BigInt(10000000); // 10 * 10^6 (rate=100)
+
+        await token.mint(bob.address, publicAmount);
+
+        // Wrap
+        await token.connect(bob).wrap(publicAmount);
+
+        // Verify confidential balance (scaled down by rate=100)
+        const balanceHandle = await token.confidentialBalanceOf(bob.address);
+        await hre.cofhe.mocks.expectPlaintext(balanceHandle, expectedConfidentialAmount);
+
+        // Unwrap
+        await token.connect(bob).unwrap(expectedConfidentialAmount);
+        await hre.network.provider.send("evm_increaseTime", [11]);
+        await hre.network.provider.send("evm_mine");
+
+        // Claim
+        await token.connect(bob).claimUnwrapped();
+
+        // Verify public balance restored (scaled back up by rate=100)
+        expect(await token.balanceOf(bob.address)).to.equal(publicAmount);
+      });
+
+      it("Should fail to wrap amounts smaller than rate", async function () {
+        const { token, bob } = await deploy8DecimalToken();
+
+        // Rate is 100 (8 decimals -> 6 decimals)
+        // Amount < 100 should fail
+        const dustAmount = BigInt(50);
+        await token.mint(bob.address, BigInt(1000000));
+
+        await expect(token.connect(bob).wrap(dustAmount)).to.be.revertedWithCustomError(
+          token,
+          "AmountTooSmallForConfidentialPrecision",
+        );
+      });
     });
   });
 });
