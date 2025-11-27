@@ -32,6 +32,11 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     // Indicator token for showing confidential activity
     ERC20ConfidentialIndicator public immutable indicatorToken;
 
+    // Decimals configuration - set at construction time
+    uint8 private immutable _decimals;
+    uint8 private immutable _confidentialDecimals;
+    uint256 private immutable _conversionRate;
+
     // Unshield claim system - only one claim per user at a time
     struct UnshieldClaim {
         uint256 ctHash;
@@ -44,11 +49,30 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     mapping(address => UnshieldClaim) private _userUnshieldClaims;
 
     /**
-     * @dev Constructor that deploys the indicator token
+     * @dev Constructor that deploys the indicator token and sets up decimals configuration
+     * @param name_ The name of the token
+     * @param symbol_ The symbol of the token
+     * @param decimals_ The number of decimals for the token
      */
-    constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         // Deploy the indicator token
         indicatorToken = new ERC20ConfidentialIndicator(address(this), name_, symbol_);
+
+        // Set decimals
+        _decimals = decimals_;
+
+        // Calculate confidential decimals: if public decimals <= 6, use same; otherwise cap at 6
+        _confidentialDecimals = decimals_ <= 6 ? decimals_ : 6;
+
+        // Calculate conversion rate: 10^(publicDecimals - confidentialDecimals)
+        _conversionRate = decimals_ > 6 ? 10 ** (decimals_ - 6) : 1;
+    }
+
+    /**
+     * @dev Returns the number of decimals used to get its user representation.
+     */
+    function decimals() public view virtual override returns (uint8) {
+        return _decimals;
     }
 
     /**
@@ -101,8 +125,7 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
      * If public decimals > 6, uses 6 decimals to fit safely within euint64.
      */
     function confidentialDecimals() public view virtual returns (uint8) {
-        uint8 pubDec = decimals();
-        return pubDec <= 6 ? pubDec : 6;
+        return _confidentialDecimals;
     }
 
     /**
@@ -292,15 +315,11 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     }
 
     /**
-     * @dev Calculates the conversion rate between public and private decimals.
+     * @dev Returns the conversion rate between public and private decimals.
      * Example: 18 public vs 6 private = 1e12 rate.
      */
     function _rate() internal view virtual returns (uint256) {
-        uint8 pubDec = decimals();
-        if (pubDec > 6) {
-            return 10 ** (pubDec - 6);
-        }
-        return 1;
+        return _conversionRate;
     }
 
     /**
