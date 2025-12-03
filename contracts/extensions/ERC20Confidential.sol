@@ -21,7 +21,7 @@ import { ERC20ConfidentialIndicator } from "./ERC20ConfidentialIndicator.sol";
  */
 abstract contract ERC20Confidential is ERC20, IERC20Confidential {
     // Fixed address representing the confidential token pool (using confidential tag)
-    address private constant CONFIDENTIAL_POOL = address(0x1011000000000000000000000000000000000000);
+    address public constant CONFIDENTIAL_POOL = address(0x1011000000000000000000000000000000000000);
 
     // Mapping for confidential balances (encrypted)
     mapping(address => euint64) private _confidentialBalances;
@@ -253,6 +253,15 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential {
         if (from == address(0)) revert ERC20InvalidSender(address(0));
         if (to == address(0)) revert ERC20InvalidReceiver(address(0));
         transferred = _confidentialUpdate(from, to, value);
+    }
+
+    /**
+     * @dev Internal function to mint confidential tokens
+     * Mints public tokens to the confidential pool and updates the recipient's confidential balance
+     */
+    function _confidentialMint(address to, uint64 amount) internal virtual {
+        _mint(CONFIDENTIAL_POOL, uint256(amount) * _rate());
+        _confidentialUpdate(address(0), to, FHE.asEuint64(amount));
     }
 
     /**
