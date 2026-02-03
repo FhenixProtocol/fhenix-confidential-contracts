@@ -1,6 +1,32 @@
 {
   "name": "fhenix-confidential-contracts",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "description": "Privacy-preserving FHERC-20 token standard for Fhenix Protocol",
+  "license": "MIT",
+  "author": "fhenixprotocol",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FhenixProtocol/fhenix-confidential-contracts.git"
+  },
+  "homepage": "https://github.com/FhenixProtocol/fhenix-confidential-contracts#readme",
+  "bugs": {
+    "url": "https://github.com/FhenixProtocol/fhenix-confidential-contracts/issues"
+  },
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "fhe",
+    "fhenix",
+    "privacy",
+    "erc20",
+    "fherc20",
+    "confidential",
+    "smart-contracts"
+  ],
+  "files": [
+    "contracts/**/*.sol",
+    "!contracts/test/**/*"
+  ],
   "scripts": {
     "check-types": "tsc --noEmit --incremental",
     "clean": "hardhat clean",
