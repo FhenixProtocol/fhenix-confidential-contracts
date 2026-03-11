@@ -51,7 +51,6 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
         } catch {
             // Not an FHERC20, continue
         }
-
         _erc20 = erc20_;
 
         _symbol = bytes(symbolOverride_).length == 0
@@ -85,7 +84,7 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
     function unwrap(address to, uint64 value) public {
         if (to == address(0)) to = msg.sender;
         euint64 burned = _burn(msg.sender, value);
-        FHE.decrypt(burned);
+        FHE.allowPublic(burned);
         _createClaim(to, value, burned);
         emit UnwrappedERC20(msg.sender, to, value);
     }
@@ -94,23 +93,11 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
      * @notice Claim a decrypted amount of the underlying ERC20
      * @param ctHash The ctHash of the burned amount
      */
-    function claimUnwrapped(uint256 ctHash) public {
-        Claim memory claim = _handleClaim(ctHash);
+    function claimUnwrapped(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionSignature) public {
+        Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionSignature);
 
         // Send the ERC20 to the recipient
         _erc20.safeTransfer(claim.to, claim.decryptedAmount);
         emit ClaimedUnwrappedERC20(msg.sender, claim.to, claim.decryptedAmount);
-    }
-
-    /**
-     * @notice Claim all decrypted amounts of the underlying ERC20
-     */
-    function claimAllUnwrapped() public {
-        Claim[] memory claims = _handleClaimAll();
-
-        for (uint256 i = 0; i < claims.length; i++) {
-            _erc20.safeTransfer(claims[i].to, claims[i].decryptedAmount);
-            emit ClaimedUnwrappedERC20(msg.sender, claims[i].to, claims[i].decryptedAmount);
-        }
     }
 }

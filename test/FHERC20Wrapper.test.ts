@@ -81,8 +81,11 @@ describe("FHERC20Wrapper", function () {
     it("Should succeed", async function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
-      expect(await eBTC.totalSupply()).to.equal(0, "Total indicated supply init 0");
-      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
+      expect(await eBTC.totalSupply()).to.equal(ethers.ZeroHash, "Total indicated supply init 0");
+      expect(await eBTC.confidentialTotalSupply()).to.equal(
+        ethers.ZeroHash,
+        "Total supply not initialized (hash is 0)",
+      );
 
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);
@@ -121,10 +124,13 @@ describe("FHERC20Wrapper", function () {
 
   describe("unwrap & claim balance (FHERC20 -> ERC20)", function () {
     it("Should succeed", async function () {
-      const { eBTC, bob, wBTC } = await setupFixture();
+      const { eBTC, bob, wBTC, bobClient } = await setupFixture();
 
       expect(await eBTC.totalSupply()).to.equal(0, "Total supply init 0");
-      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
+      expect(await eBTC.confidentialTotalSupply()).to.equal(
+        ethers.ZeroHash,
+        "Total supply not initialized (hash is 0)",
+      );
 
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);
@@ -169,7 +175,10 @@ describe("FHERC20Wrapper", function () {
       await prepExpectERC20BalancesChange(wBTC, bob.address);
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      await eBTC.connect(bob).claimUnwrapped(claimableCtHash);
+      // Decrypt with signature
+      const decryption = await bobClient.decryptForTx(claimableCtHash).withoutPermit().execute();
+
+      await eBTC.connect(bob).claimUnwrapped(claimableCtHash, decryption.decryptedValue, decryption.signature);
 
       // -- expect only **ERC20** balance to change
       await expectERC20BalancesChange(wBTC, bob.address, 1n * transferValue);
@@ -189,40 +198,6 @@ describe("FHERC20Wrapper", function () {
         "Total indicated supply decreases",
       );
       await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), mintValue - transferValue);
-    });
-    it("Should claim all unwrapped amounts", async function () {
-      const { eBTC, bob, wBTC } = await setupFixture();
-
-      expect(await eBTC.totalSupply()).to.equal(0, "Total supply init 0");
-      expect(await eBTC.confidentialTotalSupply()).to.equal(0, "Total supply not initialized (hash is 0)");
-
-      const mintValue = BigInt(10e8);
-      const transferValue = BigInt(1e8);
-
-      // Mint and wrap wBTC
-      await wBTC.mint(bob, mintValue);
-      await wBTC.connect(bob).approve(eBTC.target, mintValue);
-      await eBTC.connect(bob).wrap(bob.address, mintValue);
-
-      // Multiple unwraps
-
-      await eBTC.connect(bob).unwrap(bob.address, transferValue);
-      await eBTC.connect(bob).unwrap(bob.address, transferValue);
-
-      // Hardhat time travel 11 seconds
-      await hre.network.provider.send("evm_increaseTime", [11]);
-      await hre.network.provider.send("evm_mine");
-
-      prepExpectERC20BalancesChange(wBTC, bob.address);
-
-      // Claim all unwrapped amounts
-      await eBTC.connect(bob).claimAllUnwrapped();
-
-      await expectERC20BalancesChange(wBTC, bob.address, 2n * transferValue);
-
-      // Expect all unwrapped amounts to be claimed
-      const claims = await eBTC.getUserClaims(bob.address);
-      expect(claims.length).to.equal(0, "Bob has no claimable amounts");
     });
   });
 });

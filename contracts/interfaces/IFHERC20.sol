@@ -35,7 +35,7 @@ interface IFHERC20 is IERC20, IERC20Metadata {
      *
      * Note that `value` may be zero.
      */
-    event ConfidentialTransfer(address indexed from, address indexed to, uint256 value_hash);
+    event ConfidentialTransfer(address indexed from, address indexed to, bytes32 value_hash);
 
     /**
      * @dev Emitted when the expiration timestamp for an operator `operator` is updated for a given `holder`.
