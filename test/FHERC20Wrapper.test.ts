@@ -29,9 +29,12 @@ describe("FHERC20Wrapper", function () {
     const [owner, bob, alice, eve] = await ethers.getSigners();
     const { wBTC, eBTC } = await deployContracts();
 
-    await hre.cofhe.initializeWithHardhatSigner(owner);
+    const ownerClient = await hre.cofhe.createClientWithBatteries(owner);
+    const bobClient = await hre.cofhe.createClientWithBatteries(bob);
+    const aliceClient = await hre.cofhe.createClientWithBatteries(alice);
+    const eveClient = await hre.cofhe.createClientWithBatteries(eve);
 
-    return { owner, bob, alice, eve, wBTC, eBTC };
+    return { ownerClient, bobClient, aliceClient, eveClient, owner, bob, alice, eve, wBTC, eBTC };
   }
 
   describe("initialization", function () {

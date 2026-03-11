@@ -1,6 +1,6 @@
 import hre, { ethers } from "hardhat";
 import { FHERC20_Harness, MockVault } from "../typechain-types";
-import { cofhejs, Encryptable } from "cofhejs/node";
+import { Encryptable } from "@cofhe/sdk";
 import { expect } from "chai";
 import { expectFHERC20BalancesChange, prepExpectFHERC20BalancesChange, tick, ticksToIndicated } from "./utils";
 
@@ -25,19 +25,22 @@ describe("MockVault (confidentialTransferFrom)", function () {
     const [owner, bob, alice, eve] = await ethers.getSigners();
     const { XFHE, Vault } = await deployContracts();
 
-    await hre.cofhe.initializeWithHardhatSigner(owner);
+    const ownerClient = await hre.cofhe.createClientWithBatteries(owner);
+    const bobClient = await hre.cofhe.createClientWithBatteries(bob);
+    const aliceClient = await hre.cofhe.createClientWithBatteries(alice);
+    const eveClient = await hre.cofhe.createClientWithBatteries(eve);
 
     // Give bob and alice XFHE
     const mintValue = ethers.parseEther("10");
     await XFHE.mint(bob, mintValue);
     await XFHE.mint(alice, mintValue);
 
-    return { owner, bob, alice, eve, XFHE, Vault };
+    return { ownerClient, bobClient, aliceClient, eveClient, owner, bob, alice, eve, XFHE, Vault };
   }
 
   describe("Deposit", async function () {
     it("test", async function () {
-      const { bob, XFHE, Vault } = await setupFixture();
+      const { bob, XFHE, Vault, bobClient } = await setupFixture();
       const VaultAddress = await Vault.getAddress();
 
       // Mint to vault (initialize indicator)
@@ -45,8 +48,7 @@ describe("MockVault (confidentialTransferFrom)", function () {
 
       // Encrypt transfer value
       const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       // Success - Bob -> Vault
 
