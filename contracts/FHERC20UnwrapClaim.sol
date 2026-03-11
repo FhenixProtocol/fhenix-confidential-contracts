@@ -45,8 +45,8 @@ abstract contract FHERC20UnwrapClaim {
         uint64 decryptedAmount,
         bytes memory decryptionSignature
     ) internal returns (Claim memory claim) {
-        // Verify decryption signature
-        FHE.verifyDecryptResult(euint64.wrap(ctHash), decryptedAmount, decryptionSignature);
+        // Verify decryption signature and publish result
+        FHE.publishDecryptResult(euint64.wrap(ctHash), decryptedAmount, decryptionSignature);
 
         // Get the claim
         claim = _claims[ctHash];

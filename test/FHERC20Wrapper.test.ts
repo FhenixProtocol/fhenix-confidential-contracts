@@ -186,6 +186,8 @@ describe("FHERC20Wrapper", function () {
 
       // Claimable amount is now claimed
       claim = await eBTC.getClaim(claimableCtHash);
+      expect(claim.decryptedAmount).to.equal(transferValue, "Claimable amount decrypted");
+      expect(claim.decrypted).to.equal(true, "Claimable amount decrypted");
       expect(claim.claimed).to.equal(true, "Claimable amount claimed");
 
       // User has no claimable amounts left

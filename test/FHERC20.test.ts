@@ -631,7 +631,7 @@ describe("FHERC20", function () {
     };
 
     it("Should transfer from bob to receiver with callback (as operator)", async function () {
-      const { XFHE, bob, alice, receiver, bobClient, aliceClient } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, receiver, aliceClient } = await setupTransferFromAndCallFixture();
 
       const receiverAddress = await receiver.getAddress();
 
