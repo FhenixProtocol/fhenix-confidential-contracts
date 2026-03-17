@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import * as dotenv from "dotenv";
 dotenv.config();
 import { HardhatUserConfig } from "hardhat/config";
@@ -10,7 +11,7 @@ import "solidity-coverage";
 import "@nomicfoundation/hardhat-verify";
 import "hardhat-deploy";
 import "hardhat-deploy-ethers";
-import "cofhe-hardhat-plugin";
+import "@cofhe/hardhat-plugin";
 
 // If not set, it uses ours Alchemy's default API key.
 // You can get your own at https://dashboard.alchemyapi.io

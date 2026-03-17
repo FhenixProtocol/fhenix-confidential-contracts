@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
 import { FHERC20_Harness } from "../typechain-types";
-import { cofhejs, Encryptable } from "cofhejs/node";
+import { Encryptable } from "@cofhe/sdk";
 import { expectFHERC20BalancesChange, prepExpectFHERC20BalancesChange, ticksToIndicated, tick } from "./utils";
 import { ZeroAddress } from "ethers";
 
@@ -20,9 +20,12 @@ describe("FHERC20", function () {
     const [owner, bob, alice, eve] = await ethers.getSigners();
     const { XFHE } = await deployContracts();
 
-    await hre.cofhe.initializeWithHardhatSigner(owner);
+    const ownerClient = await hre.cofhe.createClientWithBatteries(owner);
+    const bobClient = await hre.cofhe.createClientWithBatteries(bob);
+    const aliceClient = await hre.cofhe.createClientWithBatteries(alice);
+    const eveClient = await hre.cofhe.createClientWithBatteries(eve);
 
-    return { owner, bob, alice, eve, XFHE };
+    return { ownerClient, bobClient, aliceClient, eveClient, owner, bob, alice, eve, XFHE };
   }
 
   describe("initialization", function () {
@@ -46,23 +49,23 @@ describe("FHERC20", function () {
       const burnValue = ethers.parseEther("1");
 
       // Balance 9999 -> wraparound -> 5001
-      await XFHE.setUserIndicatedBalance(bob, 9999);
-      await XFHE.mint(bob, mintValue);
-      expect(await XFHE.balanceOf(bob)).to.equal(await ticksToIndicated(XFHE, 5001n));
+      await XFHE.setUserIndicatedBalance(bob.address, 9999);
+      await XFHE.mint(bob.address, mintValue);
+      expect(await XFHE.balanceOf(bob.address)).to.equal(await ticksToIndicated(XFHE, 5001n));
 
       // Balance 1 -> wraparound -> 4999
-      await XFHE.setUserIndicatedBalance(bob, 1);
-      await XFHE.burn(bob, burnValue);
-      expect(await XFHE.balanceOf(bob)).to.equal(await ticksToIndicated(XFHE, 4999n));
+      await XFHE.setUserIndicatedBalance(bob.address, 1);
+      await XFHE.burn(bob.address, burnValue);
+      expect(await XFHE.balanceOf(bob.address)).to.equal(await ticksToIndicated(XFHE, 4999n));
 
       // Total supply 9999 -> wraparound -> 5001
       await XFHE.setTotalIndicatedSupply(9999);
-      await XFHE.mint(bob, mintValue);
+      await XFHE.mint(bob.address, mintValue);
       expect(await XFHE.totalSupply()).to.equal(await ticksToIndicated(XFHE, 5001n));
 
       // Total supply 1 -> wraparound -> 4999
       await XFHE.setTotalIndicatedSupply(1);
-      await XFHE.burn(bob, burnValue);
+      await XFHE.burn(bob.address, burnValue);
       expect(await XFHE.totalSupply()).to.equal(await ticksToIndicated(XFHE, 4999n));
     });
   });
@@ -213,20 +216,16 @@ describe("FHERC20", function () {
 
   describe("encTransfer", function () {
     it("Should transfer from bob to alice", async function () {
-      const { XFHE, bob, alice } = await setupFixture();
+      const { XFHE, bob, alice, bobClient } = await setupFixture();
 
       const mintValue = ethers.parseEther("10");
 
-      await XFHE.mint(bob, mintValue);
-      await XFHE.mint(alice, mintValue);
-
-      // Initialize bob in cofhejs
-      await hre.cofhe.expectResultSuccess(await hre.cofhe.initializeWithHardhatSigner(bob));
+      await XFHE.mint(bob.address, mintValue);
+      await XFHE.mint(alice.address, mintValue);
 
       // Encrypt transfer value
       const transferValueRaw = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValueRaw)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValueRaw)]).execute();
 
       // encTransfer
 
@@ -254,12 +253,11 @@ describe("FHERC20", function () {
     });
 
     it("Should revert on transfer to 0 address", async function () {
-      const { XFHE, bob } = await setupFixture();
+      const { XFHE, bob, bobClient } = await setupFixture();
 
       // Encrypt transfer value
       const transferValueRaw = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValueRaw)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValueRaw)]).execute();
 
       // encTransfer (reverts)
       await expect(
@@ -312,22 +310,17 @@ describe("FHERC20", function () {
 
   describe("confidentialTransferFrom", function () {
     const setupEncTransferFromFixture = async () => {
-      const { XFHE, bob, alice, eve } = await setupFixture();
+      const { XFHE, bob, alice, eve, aliceClient, eveClient, bobClient } = await setupFixture();
 
       const mintValue = ethers.parseEther("10");
       await XFHE.mint(bob, mintValue);
       await XFHE.mint(alice, mintValue);
 
-      // Encrypt transfer value
-      const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
-
-      return { XFHE, bob, alice, eve, encTransferInput, transferValue };
+      return { XFHE, bob, alice, eve, aliceClient, eveClient, bobClient };
     };
 
     it("Should transfer from bob to alice", async function () {
-      const { XFHE, bob, alice, encTransferInput, transferValue } = await setupEncTransferFromFixture();
+      const { XFHE, bob, alice, aliceClient } = await setupEncTransferFromFixture();
 
       // Success - Bob -> Alice
 
@@ -337,6 +330,10 @@ describe("FHERC20", function () {
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await expect(
         XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
@@ -363,7 +360,7 @@ describe("FHERC20", function () {
     });
 
     it("Should transfer from bob to alice (eve spender)", async function () {
-      const { XFHE, bob, alice, eve, encTransferInput, transferValue } = await setupEncTransferFromFixture();
+      const { XFHE, bob, alice, eve, eveClient } = await setupEncTransferFromFixture();
 
       // Success - Bob -> Alice
 
@@ -373,6 +370,10 @@ describe("FHERC20", function () {
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await eveClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await expect(
         XFHE.connect(eve)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
@@ -399,7 +400,7 @@ describe("FHERC20", function () {
     });
 
     it("Should transfer from bob to MockVault", async function () {
-      const { XFHE, bob, encTransferInput, transferValue } = await setupEncTransferFromFixture();
+      const { XFHE, bob, bobClient } = await setupEncTransferFromFixture();
 
       const vaultFactory = await ethers.getContractFactory("MockVault");
       const Vault = await vaultFactory.deploy(XFHE.target);
@@ -414,6 +415,10 @@ describe("FHERC20", function () {
       // Set vault as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await XFHE.connect(bob).setOperator(vaultAddress, timestamp);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, vaultAddress);
@@ -437,11 +442,15 @@ describe("FHERC20", function () {
     });
 
     it("Should revert if invalid receiver", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupEncTransferFromFixture();
+      const { XFHE, bob, alice, aliceClient } = await setupEncTransferFromFixture();
 
       // Set alice as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await expect(
         XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
@@ -453,13 +462,17 @@ describe("FHERC20", function () {
     });
 
     it("Should revert on spender mismatch", async function () {
-      const { XFHE, bob, alice, eve, encTransferInput } = await setupEncTransferFromFixture();
+      const { XFHE, bob, alice, eve, aliceClient } = await setupEncTransferFromFixture();
 
       // FHERC20ConfidentialTransferFromSpenderMismatch
 
       // Set eve as operator for bob (not alice)
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await XFHE.connect(bob).setOperator(eve.address, timestamp);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       // Expect revert
 
@@ -475,10 +488,10 @@ describe("FHERC20", function () {
 
   describe("confidentialTransferAndCall", function () {
     const setupTransferAndCallFixture = async () => {
-      const { XFHE, bob, alice, eve } = await setupFixture();
+      const { XFHE, bob, alice, eve, bobClient } = await setupFixture();
 
       const mintValue = ethers.parseEther("10");
-      await XFHE.mint(bob, mintValue);
+      await XFHE.mint(bob.address, mintValue);
 
       // Deploy receiver contract
       const receiverFactory = await ethers.getContractFactory("MockFHERC20Receiver");
@@ -487,8 +500,7 @@ describe("FHERC20", function () {
 
       // Encrypt transfer value
       const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       return { XFHE, bob, alice, eve, receiver, encTransferInput, transferValue };
     };
@@ -549,7 +561,7 @@ describe("FHERC20", function () {
     it("Should transfer with callback to EOA", async function () {
       const { XFHE, bob, alice, encTransferInput, transferValue } = await setupTransferAndCallFixture();
 
-      await XFHE.mint(alice, ethers.parseEther("1")); // Initialize alice's balance
+      await XFHE.mint(alice.address, ethers.parseEther("1")); // Initialize alice's balance
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
@@ -604,27 +616,22 @@ describe("FHERC20", function () {
 
   describe("confidentialTransferFromAndCall", function () {
     const setupTransferFromAndCallFixture = async () => {
-      const { XFHE, bob, alice, eve } = await setupFixture();
+      const { XFHE, bob, alice, eve, bobClient, aliceClient, eveClient } = await setupFixture();
 
       const mintValue = ethers.parseEther("10");
-      await XFHE.mint(bob, mintValue);
-      await XFHE.mint(alice, mintValue);
+      await XFHE.mint(bob.address, mintValue);
+      await XFHE.mint(alice.address, mintValue);
 
       // Deploy receiver contract
       const receiverFactory = await ethers.getContractFactory("MockFHERC20Receiver");
       const receiver = await receiverFactory.deploy();
       await receiver.waitForDeployment();
 
-      // Encrypt transfer value
-      const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
-
-      return { XFHE, bob, alice, eve, receiver, encTransferInput, transferValue };
+      return { XFHE, bob, alice, eve, receiver, bobClient, aliceClient, eveClient };
     };
 
     it("Should transfer from bob to receiver with callback (as operator)", async function () {
-      const { XFHE, bob, alice, receiver, encTransferInput, transferValue } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, receiver, aliceClient } = await setupTransferFromAndCallFixture();
 
       const receiverAddress = await receiver.getAddress();
 
@@ -637,12 +644,13 @@ describe("FHERC20", function () {
 
       const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [1]);
 
-      const tx = await XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
-        bob.address,
-        receiverAddress,
-        encTransferInput,
-        callData,
-      );
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
+
+      const tx = await XFHE.connect(alice)[
+        "confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"
+      ](bob.address, receiverAddress, encTransferInput, callData);
 
       await expect(tx)
         .to.emit(XFHE, "Transfer")
@@ -658,7 +666,7 @@ describe("FHERC20", function () {
     });
 
     it("Should transfer from bob to receiver with callback (failure)", async function () {
-      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, receiver, aliceClient } = await setupTransferFromAndCallFixture();
 
       // Set alice as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
@@ -666,6 +674,10 @@ describe("FHERC20", function () {
 
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, await receiver.getAddress());
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [0]);
 
@@ -685,7 +697,7 @@ describe("FHERC20", function () {
     });
 
     it("Should transfer from bob to alice (EOA) with callback", async function () {
-      const { XFHE, bob, alice, eve, encTransferInput, transferValue } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, eve, eveClient } = await setupTransferFromAndCallFixture();
 
       // Set eve as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
@@ -694,14 +706,15 @@ describe("FHERC20", function () {
       await prepExpectFHERC20BalancesChange(XFHE, bob.address);
       await prepExpectFHERC20BalancesChange(XFHE, alice.address);
 
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await eveClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
+
       const callData = "0x";
 
-      const tx = await XFHE.connect(eve)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
-        bob.address,
-        alice.address,
-        encTransferInput,
-        callData,
-      );
+      const tx = await XFHE.connect(eve)[
+        "confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"
+      ](bob.address, alice.address, encTransferInput, callData);
 
       await expect(tx)
         .to.emit(XFHE, "Transfer")
@@ -715,9 +728,13 @@ describe("FHERC20", function () {
     });
 
     it("Should revert without operator approval", async function () {
-      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, receiver, aliceClient } = await setupTransferFromAndCallFixture();
 
       const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [1]);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await expect(
         XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](
@@ -730,11 +747,15 @@ describe("FHERC20", function () {
     });
 
     it("Should revert with custom error from callback", async function () {
-      const { XFHE, bob, alice, receiver, encTransferInput } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, receiver, aliceClient } = await setupTransferFromAndCallFixture();
 
       // Set alice as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       const callData = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [2]);
 
@@ -751,11 +772,15 @@ describe("FHERC20", function () {
     });
 
     it("Should revert on transfer to zero address", async function () {
-      const { XFHE, bob, alice, encTransferInput } = await setupTransferFromAndCallFixture();
+      const { XFHE, bob, alice, aliceClient } = await setupTransferFromAndCallFixture();
 
       // Set alice as operator for bob
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await XFHE.connect(bob).setOperator(alice.address, timestamp);
+
+      // Encrypt transfer value
+      const transferValue = ethers.parseEther("1");
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
       await expect(
         XFHE.connect(alice)["confidentialTransferFromAndCall(address,address,(uint256,uint8,uint8,bytes),bytes)"](

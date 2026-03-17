@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import hre from "hardhat";
-import { cofhejs, Encryptable } from "cofhejs/node";
+import { Encryptable } from "@cofhe/sdk";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { generateTransferFromPermit } from "./utils";
 import { FHERC20Permit_Harness } from "../typechain-types";
@@ -15,9 +15,12 @@ describe("FHERC20Permit", function () {
     await XFHE.waitForDeployment();
 
     // Initialize CoFHE
-    await hre.cofhe.initializeWithHardhatSigner(owner);
+    const ownerClient = await hre.cofhe.createClientWithBatteries(owner);
+    const bobClient = await hre.cofhe.createClientWithBatteries(bob);
+    const aliceClient = await hre.cofhe.createClientWithBatteries(alice);
+    const eveClient = await hre.cofhe.createClientWithBatteries(eve);
 
-    return { XFHE, owner, bob, alice, eve };
+    return { ownerClient, bobClient, aliceClient, eveClient, owner, bob, alice, eve, XFHE };
   };
 
   describe("permit", function () {
@@ -38,7 +41,7 @@ describe("FHERC20Permit", function () {
       await XFHE.permit(permit.owner, permit.spender, permit.until, permit.deadline, permit.v, permit.r, permit.s);
 
       expect(await XFHE.nonces(bob.address)).to.equal(1n);
-      expect(await XFHE.isOperator(bob.address, alice.address)).to.be.true;
+      expect(await XFHE.isOperator(bob.address, alice.address)).to.equal(true);
     });
 
     it("Should reject reused signature", async function () {
@@ -110,7 +113,7 @@ describe("FHERC20Permit", function () {
     });
 
     it("Should allow operator to transfer after permit", async function () {
-      const { XFHE, bob, alice } = await loadFixture(setupFixture);
+      const { XFHE, bob, alice, aliceClient } = await loadFixture(setupFixture);
 
       // Mint tokens to bob
       const mintValue = ethers.parseEther("10");
@@ -130,11 +133,11 @@ describe("FHERC20Permit", function () {
       // Set alice as operator via permit
       await XFHE.permit(permit.owner, permit.spender, permit.until, permit.deadline, permit.v, permit.r, permit.s);
 
-      // Alice should be able to transfer from bob
+      // Encrypt transfer value
       const transferValue = ethers.parseEther("1");
-      const encTransferResult = await cofhejs.encrypt([Encryptable.uint64(transferValue)] as const);
-      const [encTransferInput] = await hre.cofhe.expectResultSuccess(encTransferResult);
+      const [encTransferInput] = await aliceClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
 
+      // Alice should be able to transfer from bob
       await expect(
         XFHE.connect(alice)["confidentialTransferFrom(address,address,(uint256,uint8,uint8,bytes))"](
           bob.address,

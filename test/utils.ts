@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ERC20, FHERC20, IFHERC20 } from "../typechain-types";
+import { ERC20, FHERC20, FHERC20Permit } from "../typechain-types";
 import hre, { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { TypedDataDomain } from "ethers";
@@ -82,7 +82,7 @@ export const expectERC20BalancesChange = async (token: ERC20, account: string, e
 // Operator Permit
 type GeneratePermitOptions = {
   signer: HardhatEthersSigner;
-  token: FHERC20;
+  token: FHERC20Permit;
   owner: string;
   spender: string;
   until: number | bigint;
@@ -95,15 +95,15 @@ export const getNowTimestamp = () => {
 };
 
 export const generateTransferFromPermit = async (options: GeneratePermitOptions) => {
-  let { token, signer, owner, spender, until, nonce, deadline } = options;
+  const { token, signer, owner, spender, until } = options;
+
+  // Nonce or default
+  const nonce = options.nonce ?? (await token.nonces(owner));
+
+  // Deadline or default
+  const deadline = options.deadline ?? getNowTimestamp() + BigInt(24 * 60 * 60);
 
   const { name, version, chainId, verifyingContract } = await token.eip712Domain();
-
-  // If nonce is not provided, get it from the token
-  if (nonce == null) nonce = await token.nonces(owner);
-
-  // If deadline is not provided, set it to 24 hours from now
-  if (deadline == null) deadline = getNowTimestamp() + BigInt(24 * 60 * 60);
 
   const domain: TypedDataDomain = {
     name,
