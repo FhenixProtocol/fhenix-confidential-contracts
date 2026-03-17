@@ -122,6 +122,80 @@ describe("FHERC20Wrapper", function () {
     });
   });
 
+  describe("unwrap & claimBatch balance (FHERC20 -> ERC20)", function () {
+    it("Should claim multiple unwrapped amounts in a single batch", async function () {
+      const { eBTC, bob, wBTC, bobClient } = await setupFixture();
+
+      const mintValue = BigInt(10e8);
+      const transferValue1 = BigInt(1e8);
+      const transferValue2 = BigInt(2e8);
+
+      // Mint and wrap wBTC for bob
+      await wBTC.mint(bob, mintValue);
+      await wBTC.connect(bob).approve(eBTC.target, mintValue);
+      await eBTC.connect(bob).wrap(bob, mintValue);
+
+      // Bob unwraps twice, creating two pending claims
+      await eBTC.connect(bob).unwrap(bob, transferValue1);
+      await eBTC.connect(bob).unwrap(bob, transferValue2);
+
+      const bobClaims = await eBTC.getUserClaims(bob.address);
+      expect(bobClaims.length).to.equal(2, "Bob has 2 pending claims");
+
+      // Time-travel past the decryption delay
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const ctHashes: string[] = [bobClaims[0].ctHash, bobClaims[1].ctHash];
+
+      const [dec0, dec1] = await Promise.all([
+        bobClient.decryptForTx(ctHashes[0]).withoutPermit().execute(),
+        bobClient.decryptForTx(ctHashes[1]).withoutPermit().execute(),
+      ]);
+
+      const decryptedAmounts = [dec0.decryptedValue, dec1.decryptedValue];
+      const signatures = [dec0.signature, dec1.signature];
+
+      await prepExpectERC20BalancesChange(wBTC, bob.address);
+
+      await expect(eBTC.connect(bob).claimUnwrappedBatch(ctHashes, decryptedAmounts, signatures))
+        .to.emit(eBTC, "ClaimedUnwrappedERC20")
+        .to.emit(eBTC, "ClaimedUnwrappedERC20");
+
+      await expectERC20BalancesChange(wBTC, bob.address, transferValue1 + transferValue2);
+
+      expect((await eBTC.getUserClaims(bob.address)).length).to.equal(0, "Bob has no pending claims");
+
+      for (const ctHash of ctHashes) {
+        const claim = await eBTC.getClaim(ctHash);
+        expect(claim.claimed).to.equal(true, "Claim is marked as claimed");
+        expect(claim.decrypted).to.equal(true, "Claim is marked as decrypted");
+      }
+    });
+
+    it("Should revert when array lengths mismatch", async function () {
+      const { eBTC } = await setupFixture();
+
+      const dummyHash = ethers.ZeroHash;
+
+      await expect(
+        eBTC.claimUnwrappedBatch(
+          [dummyHash, dummyHash],
+          [1n],
+          [new Uint8Array(0), new Uint8Array(0)],
+        ),
+      ).to.be.revertedWithCustomError(eBTC, "LengthMismatch");
+
+      await expect(
+        eBTC.claimUnwrappedBatch(
+          [dummyHash, dummyHash],
+          [1n, 2n],
+          [new Uint8Array(0)],
+        ),
+      ).to.be.revertedWithCustomError(eBTC, "LengthMismatch");
+    });
+  });
+
   describe("unwrap & claim balance (FHERC20 -> ERC20)", function () {
     it("Should succeed", async function () {
       const { eBTC, bob, wBTC, bobClient } = await setupFixture();

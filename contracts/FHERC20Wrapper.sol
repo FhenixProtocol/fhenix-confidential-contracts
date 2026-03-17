@@ -100,4 +100,27 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
         _erc20.safeTransfer(claim.to, claim.decryptedAmount);
         emit ClaimedUnwrappedERC20(msg.sender, claim.to, claim.decryptedAmount);
     }
+
+    /**
+     * @notice Claim multiple decrypted amounts of the underlying ERC20
+     * @param ctHashes The ctHashes of the burned amounts
+     * @param decryptedAmounts The decrypted amounts
+     * @param decryptionSignatures The decryption signatures
+     */
+    function claimUnwrappedBatch(
+        bytes32[] memory ctHashes,
+        uint64[] memory decryptedAmounts,
+        bytes[] memory decryptionSignatures
+    ) public {
+        if (ctHashes.length != decryptedAmounts.length || ctHashes.length != decryptionSignatures.length) {
+            revert LengthMismatch();
+        }
+
+        Claim[] memory claims = _handleClaimBatch(ctHashes, decryptedAmounts, decryptionSignatures);
+
+        for (uint256 i = 0; i < claims.length; i++) {
+            _erc20.safeTransfer(claims[i].to, claims[i].decryptedAmount);
+            emit ClaimedUnwrappedERC20(msg.sender, claims[i].to, claims[i].decryptedAmount);
+        }
+    }
 }

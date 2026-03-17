@@ -27,6 +27,7 @@ abstract contract FHERC20UnwrapClaim {
 
     error ClaimNotFound();
     error AlreadyClaimed();
+    error LengthMismatch();
 
     function _createClaim(address to, uint64 value, euint64 claimable) internal {
         _claims[euint64.unwrap(claimable)] = Claim({
@@ -65,6 +66,22 @@ abstract contract FHERC20UnwrapClaim {
 
         // Remove the claimable amount from the user's claimable set
         _userClaims[claim.to].remove(ctHash);
+    }
+
+    function _handleClaimBatch(
+        bytes32[] memory ctHashes,
+        uint64[] memory decryptedAmounts,
+        bytes[] memory decryptionSignatures
+    ) internal returns (Claim[] memory claims) {
+        if (ctHashes.length != decryptedAmounts.length || ctHashes.length != decryptionSignatures.length) {
+            revert LengthMismatch();
+        }
+
+        claims = new Claim[](ctHashes.length);
+        for (uint256 i = 0; i < ctHashes.length; i++) {
+            claims[i] = _handleClaim(ctHashes[i], decryptedAmounts[i], decryptionSignatures[i]);
+        }
+        return claims;
     }
 
     function getClaim(bytes32 ctHash) public view returns (Claim memory) {
