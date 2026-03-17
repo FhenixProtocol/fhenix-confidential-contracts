@@ -6,19 +6,21 @@ pragma solidity ^0.8.25;
 import { IERC20, IERC20Metadata, ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { euint64, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IFHERC20, FHERC20 } from "./FHERC20.sol";
 import { FHERC20UnshieldClaim } from "./FHERC20UnshieldClaim.sol";
 
-contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
+contract FHERC20WrappedERC20 is FHERC20, Ownable, FHERC20UnshieldClaim {
     using SafeERC20 for IERC20;
 
     IERC20 private immutable _erc20;
+    uint256 private immutable _conversionRate;
     string private _symbol;
 
-    event ShieldedERC20(address indexed from, address indexed to, uint64 value);
+    event ShieldedERC20(address indexed from, address indexed to, uint256 value);
     event UnshieldedERC20(address indexed from, address indexed to, uint64 value);
-    event ClaimedUnshieldedERC20(address indexed from, address indexed to, uint64 value);
+    event ClaimedUnshieldedERC20(address indexed from, address indexed to, uint256 value);
     event SymbolUpdated(string symbol);
 
     /**
@@ -31,6 +33,11 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
      */
     error InvalidRecipient();
 
+    /**
+     * @dev The shielded amount is too small to represent at confidential precision.
+     */
+    error AmountTooSmallForConfidentialPrecision();
+
     constructor(
         IERC20 erc20_,
         string memory symbolOverride_
@@ -41,7 +48,9 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
             bytes(symbolOverride_).length == 0
                 ? string.concat("e", IERC20Metadata(address(erc20_)).symbol())
                 : symbolOverride_,
-            IERC20Metadata(address(erc20_)).decimals()
+            IERC20Metadata(address(erc20_)).decimals() <= 6
+                ? IERC20Metadata(address(erc20_)).decimals()
+                : 6
         )
     {
         try IFHERC20(address(erc20_)).isFherc20() returns (bool isFherc20) {
@@ -56,6 +65,11 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
         _symbol = bytes(symbolOverride_).length == 0
             ? string.concat("e", IERC20Metadata(address(erc20_)).symbol())
             : symbolOverride_;
+
+        // Conversion rate between the underlying ERC20 denomination and the confidential
+        // precision (capped at 6 decimals to fit safely within euint64).
+        uint8 underlyingDecimals = IERC20Metadata(address(erc20_)).decimals();
+        _conversionRate = underlyingDecimals > 6 ? 10 ** (underlyingDecimals - 6) : 1;
     }
 
     function symbol() public view override returns (string memory) {
@@ -74,11 +88,18 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
         return _erc20;
     }
 
-    function shield(address to, uint64 value) public {
+    function shield(address to, uint256 value) public {
         if (to == address(0)) to = msg.sender;
-        _erc20.safeTransferFrom(msg.sender, address(this), value);
-        _mint(to, value);
-        emit ShieldedERC20(msg.sender, to, value);
+
+        // Truncate to a multiple of the conversion rate to avoid precision loss.
+        uint256 alignedValue = value - (value % _conversionRate);
+        if (alignedValue == 0) revert AmountTooSmallForConfidentialPrecision();
+
+        uint64 confidentialAmount = SafeCast.toUint64(alignedValue / _conversionRate);
+
+        _erc20.safeTransferFrom(msg.sender, address(this), alignedValue);
+        _mint(to, confidentialAmount);
+        emit ShieldedERC20(msg.sender, to, alignedValue);
     }
 
     function unshield(address to, uint64 value) public {
@@ -96,9 +117,10 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
     function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionSignature) public {
         Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionSignature);
 
-        // Send the ERC20 to the recipient
-        _erc20.safeTransfer(claim.to, claim.decryptedAmount);
-        emit ClaimedUnshieldedERC20(msg.sender, claim.to, claim.decryptedAmount);
+        // Scale confidential units back up to the underlying ERC20 denomination.
+        uint256 erc20Amount = uint256(claim.decryptedAmount) * _conversionRate;
+        _erc20.safeTransfer(claim.to, erc20Amount);
+        emit ClaimedUnshieldedERC20(msg.sender, claim.to, erc20Amount);
     }
 
     /**
@@ -119,8 +141,9 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
         Claim[] memory claims = _handleClaimBatch(ctHashes, decryptedAmounts, decryptionSignatures);
 
         for (uint256 i = 0; i < claims.length; i++) {
-            _erc20.safeTransfer(claims[i].to, claims[i].decryptedAmount);
-            emit ClaimedUnshieldedERC20(msg.sender, claims[i].to, claims[i].decryptedAmount);
+            uint256 erc20Amount = uint256(claims[i].decryptedAmount) * _conversionRate;
+            _erc20.safeTransfer(claims[i].to, erc20Amount);
+            emit ClaimedUnshieldedERC20(msg.sender, claims[i].to, erc20Amount);
         }
     }
 }
