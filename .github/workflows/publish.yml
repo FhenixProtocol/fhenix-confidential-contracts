@@ -20,10 +20,10 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Setup pnpm 8
+      - name: Setup pnpm 9
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -49,10 +49,10 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Setup pnpm 8
+      - name: Setup pnpm 9
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js 22.x
         uses: actions/setup-node@v4
@@ -79,10 +79,10 @@ jobs:
         with:
           fetch-depth: 0 # required for tagging
 
-      - name: Setup pnpm 8
+      - name: Setup pnpm 9
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js 22.x
         uses: actions/setup-node@v4
