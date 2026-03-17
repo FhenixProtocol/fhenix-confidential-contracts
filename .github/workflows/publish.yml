@@ -1,0 +1,105 @@
+name: Publish
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  # Create (or update) the Version Packages pull request when PR merged containing a changeset
+  version-packages:
+    name: Version Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm 8
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ensure latest npm
+        run: npm i -g npm@latest
+
+      - name: Install Dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Create Release Pull Request
+        uses: changesets/action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish beta snapshots upon merge to master
+  beta-snapshot:
+    if: ${{ !contains(github.event.head_commit.message, 'Version Packages') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm 8
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Ensure latest npm
+        run: npm i -g npm@latest
+
+      - name: Install Dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Publish Beta Snapshot
+        run: pnpm run beta:snapshot
+
+  # Publish stable releases when the Version Packages pull request is merged
+  stable-release:
+    if: ${{ contains(github.event.head_commit.message, 'Version Packages') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required for tagging
+
+      - name: Setup pnpm 8
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Ensure latest npm
+        run: npm i -g npm@latest
+
+      - name: Install Dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Publish and Tag with Changesets
+        uses: changesets/action@v1
+        with:
+          publish: pnpm release
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

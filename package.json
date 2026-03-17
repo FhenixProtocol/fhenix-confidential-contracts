@@ -41,7 +41,8 @@
     "gas": "REPORT_GAS=true hardhat test --network hardhat",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "beta:snapshot": "changeset version --snapshot beta && changeset publish --tag beta"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.2.0",
