@@ -8,21 +8,21 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { euint64, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IFHERC20, FHERC20 } from "./FHERC20.sol";
-import { FHERC20UnwrapClaim } from "./FHERC20UnwrapClaim.sol";
+import { FHERC20UnshieldClaim } from "./FHERC20UnshieldClaim.sol";
 
-contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
+contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnshieldClaim {
     using SafeERC20 for IERC20;
 
     IERC20 private immutable _erc20;
     string private _symbol;
 
-    event WrappedERC20(address indexed from, address indexed to, uint64 value);
-    event UnwrappedERC20(address indexed from, address indexed to, uint64 value);
-    event ClaimedUnwrappedERC20(address indexed from, address indexed to, uint64 value);
+    event ShieldedERC20(address indexed from, address indexed to, uint64 value);
+    event UnshieldedERC20(address indexed from, address indexed to, uint64 value);
+    event ClaimedUnshieldedERC20(address indexed from, address indexed to, uint64 value);
     event SymbolUpdated(string symbol);
 
     /**
-     * @dev The erc20 token couldn't be wrapped.
+     * @dev The erc20 token couldn't be shielded.
      */
     error FHERC20InvalidErc20(address token);
 
@@ -68,37 +68,37 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
     }
 
     /**
-     * @dev Returns the address of the erc20 ERC-20 token that is being encrypted wrapped.
+     * @dev Returns the address of the erc20 ERC-20 token that is being shielded.
      */
     function erc20() public view returns (IERC20) {
         return _erc20;
     }
 
-    function wrap(address to, uint64 value) public {
+    function shield(address to, uint64 value) public {
         if (to == address(0)) to = msg.sender;
         _erc20.safeTransferFrom(msg.sender, address(this), value);
         _mint(to, value);
-        emit WrappedERC20(msg.sender, to, value);
+        emit ShieldedERC20(msg.sender, to, value);
     }
 
-    function unwrap(address to, uint64 value) public {
+    function unshield(address to, uint64 value) public {
         if (to == address(0)) to = msg.sender;
         euint64 burned = _burn(msg.sender, value);
         FHE.allowPublic(burned);
         _createClaim(to, value, burned);
-        emit UnwrappedERC20(msg.sender, to, value);
+        emit UnshieldedERC20(msg.sender, to, value);
     }
 
     /**
      * @notice Claim a decrypted amount of the underlying ERC20
      * @param ctHash The ctHash of the burned amount
      */
-    function claimUnwrapped(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionSignature) public {
+    function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionSignature) public {
         Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionSignature);
 
         // Send the ERC20 to the recipient
         _erc20.safeTransfer(claim.to, claim.decryptedAmount);
-        emit ClaimedUnwrappedERC20(msg.sender, claim.to, claim.decryptedAmount);
+        emit ClaimedUnshieldedERC20(msg.sender, claim.to, claim.decryptedAmount);
     }
 
     /**
@@ -107,7 +107,7 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
      * @param decryptedAmounts The decrypted amounts
      * @param decryptionSignatures The decryption signatures
      */
-    function claimUnwrappedBatch(
+    function claimUnshieldedBatch(
         bytes32[] memory ctHashes,
         uint64[] memory decryptedAmounts,
         bytes[] memory decryptionSignatures
@@ -120,7 +120,7 @@ contract FHERC20Wrapper is FHERC20, Ownable, FHERC20UnwrapClaim {
 
         for (uint256 i = 0; i < claims.length; i++) {
             _erc20.safeTransfer(claims[i].to, claims[i].decryptedAmount);
-            emit ClaimedUnwrappedERC20(msg.sender, claims[i].to, claims[i].decryptedAmount);
+            emit ClaimedUnshieldedERC20(msg.sender, claims[i].to, claims[i].decryptedAmount);
         }
     }
 }

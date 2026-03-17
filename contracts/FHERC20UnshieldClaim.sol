@@ -10,7 +10,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { euint64, FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IFHERC20, FHERC20 } from "./FHERC20.sol";
 
-abstract contract FHERC20UnwrapClaim {
+abstract contract FHERC20UnshieldClaim {
     using EnumerableSet for EnumerableSet.Bytes32Set;
 
     struct Claim {

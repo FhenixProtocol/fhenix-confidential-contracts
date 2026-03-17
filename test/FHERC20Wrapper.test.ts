@@ -77,7 +77,7 @@ describe("FHERC20Wrapper", function () {
     });
   });
 
-  describe("wrap balance (ERC20 -> FHERC20)", function () {
+  describe("shield balance (ERC20 -> FHERC20)", function () {
     it("Should succeed", async function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
@@ -99,7 +99,7 @@ describe("FHERC20Wrapper", function () {
       await prepExpectERC20BalancesChange(wBTC, bob.address);
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      await expect(eBTC.connect(bob).wrap(bob, transferValue)).to.emit(eBTC, "Transfer");
+      await expect(eBTC.connect(bob).shield(bob, transferValue)).to.emit(eBTC, "Transfer");
 
       await expectERC20BalancesChange(wBTC, bob.address, -1n * transferValue);
       await expectFHERC20BalancesChange(eBTC, bob.address, await ticksToIndicated(eBTC, 5001n), transferValue);
@@ -115,29 +115,29 @@ describe("FHERC20Wrapper", function () {
       await prepExpectERC20BalancesChange(wBTC, bob.address);
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      await expect(eBTC.connect(bob).wrap(bob, transferValue)).to.emit(eBTC, "Transfer");
+      await expect(eBTC.connect(bob).shield(bob, transferValue)).to.emit(eBTC, "Transfer");
 
       await expectERC20BalancesChange(wBTC, bob.address, -1n * transferValue);
       await expectFHERC20BalancesChange(eBTC, bob.address, await ticksToIndicated(eBTC, 1n), transferValue);
     });
   });
 
-  describe("unwrap & claimBatch balance (FHERC20 -> ERC20)", function () {
-    it("Should claim multiple unwrapped amounts in a single batch", async function () {
+  describe("unshield & claimBatch balance (FHERC20 -> ERC20)", function () {
+    it("Should claim multiple unshielded amounts in a single batch", async function () {
       const { eBTC, bob, wBTC, bobClient } = await setupFixture();
 
       const mintValue = BigInt(10e8);
       const transferValue1 = BigInt(1e8);
       const transferValue2 = BigInt(2e8);
 
-      // Mint and wrap wBTC for bob
+      // Mint and shield wBTC for bob
       await wBTC.mint(bob, mintValue);
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
-      await eBTC.connect(bob).wrap(bob, mintValue);
+      await eBTC.connect(bob).shield(bob, mintValue);
 
-      // Bob unwraps twice, creating two pending claims
-      await eBTC.connect(bob).unwrap(bob, transferValue1);
-      await eBTC.connect(bob).unwrap(bob, transferValue2);
+      // Bob unshields twice, creating two pending claims
+      await eBTC.connect(bob).unshield(bob, transferValue1);
+      await eBTC.connect(bob).unshield(bob, transferValue2);
 
       const bobClaims = await eBTC.getUserClaims(bob.address);
       expect(bobClaims.length).to.equal(2, "Bob has 2 pending claims");
@@ -158,9 +158,9 @@ describe("FHERC20Wrapper", function () {
 
       await prepExpectERC20BalancesChange(wBTC, bob.address);
 
-      await expect(eBTC.connect(bob).claimUnwrappedBatch(ctHashes, decryptedAmounts, signatures))
-        .to.emit(eBTC, "ClaimedUnwrappedERC20")
-        .to.emit(eBTC, "ClaimedUnwrappedERC20");
+      await expect(eBTC.connect(bob).claimUnshieldedBatch(ctHashes, decryptedAmounts, signatures))
+        .to.emit(eBTC, "ClaimedUnshieldedERC20")
+        .to.emit(eBTC, "ClaimedUnshieldedERC20");
 
       await expectERC20BalancesChange(wBTC, bob.address, transferValue1 + transferValue2);
 
@@ -179,24 +179,16 @@ describe("FHERC20Wrapper", function () {
       const dummyHash = ethers.ZeroHash;
 
       await expect(
-        eBTC.claimUnwrappedBatch(
-          [dummyHash, dummyHash],
-          [1n],
-          [new Uint8Array(0), new Uint8Array(0)],
-        ),
+        eBTC.claimUnshieldedBatch([dummyHash, dummyHash], [1n], [new Uint8Array(0), new Uint8Array(0)]),
       ).to.be.revertedWithCustomError(eBTC, "LengthMismatch");
 
       await expect(
-        eBTC.claimUnwrappedBatch(
-          [dummyHash, dummyHash],
-          [1n, 2n],
-          [new Uint8Array(0)],
-        ),
+        eBTC.claimUnshieldedBatch([dummyHash, dummyHash], [1n, 2n], [new Uint8Array(0)]),
       ).to.be.revertedWithCustomError(eBTC, "LengthMismatch");
     });
   });
 
-  describe("unwrap & claim balance (FHERC20 -> ERC20)", function () {
+  describe("unshield & claim balance (FHERC20 -> ERC20)", function () {
     it("Should succeed", async function () {
       const { eBTC, bob, wBTC, bobClient } = await setupFixture();
 
@@ -209,17 +201,17 @@ describe("FHERC20Wrapper", function () {
       const mintValue = BigInt(10e8);
       const transferValue = BigInt(1e8);
 
-      // Mint and wrap wBTC
+      // Mint and shield wBTC
       await wBTC.mint(bob, mintValue);
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
-      await eBTC.connect(bob).wrap(bob, mintValue);
+      await eBTC.connect(bob).shield(bob, mintValue);
 
       // TX
 
       await prepExpectERC20BalancesChange(wBTC, bob.address);
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      await expect(eBTC.connect(bob).unwrap(bob, transferValue)).to.emit(eBTC, "Transfer");
+      await expect(eBTC.connect(bob).unshield(bob, transferValue)).to.emit(eBTC, "Transfer");
 
       // -- expect only **FHERC20** balance to change
       await expectERC20BalancesChange(wBTC, bob.address, 0n);
@@ -230,7 +222,7 @@ describe("FHERC20Wrapper", function () {
         -1n * transferValue,
       );
 
-      // Unwrap inserts a claimable amount into the user's claimable set
+      // Unshield inserts a claimable amount into the user's claimable set
 
       let claims = await eBTC.getUserClaims(bob.address);
       expect(claims.length).to.equal(1, "Bob has 1 claimable amount");
@@ -244,7 +236,7 @@ describe("FHERC20Wrapper", function () {
       await hre.network.provider.send("evm_increaseTime", [11]);
       await hre.network.provider.send("evm_mine");
 
-      // Claim Unwrapped tokens
+      // Claim unshielded tokens
 
       await prepExpectERC20BalancesChange(wBTC, bob.address);
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
@@ -252,7 +244,7 @@ describe("FHERC20Wrapper", function () {
       // Decrypt with signature
       const decryption = await bobClient.decryptForTx(claimableCtHash).withoutPermit().execute();
 
-      await eBTC.connect(bob).claimUnwrapped(claimableCtHash, decryption.decryptedValue, decryption.signature);
+      await eBTC.connect(bob).claimUnshielded(claimableCtHash, decryption.decryptedValue, decryption.signature);
 
       // -- expect only **ERC20** balance to change
       await expectERC20BalancesChange(wBTC, bob.address, 1n * transferValue);
