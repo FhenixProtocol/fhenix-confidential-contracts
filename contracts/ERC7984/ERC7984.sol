@@ -84,7 +84,7 @@ abstract contract ERC7984 is IERC7984, Context, ERC165 {
 
     /// @inheritdoc IERC7984
     function decimals() public view virtual returns (uint8) {
-        return 6;
+        return _decimals;
     }
 
     /// @inheritdoc IERC7984
