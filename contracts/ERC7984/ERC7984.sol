@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { FHE, Utils, euint64, InEuint64, ebool } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { FHE, euint64, InEuint64, ebool } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Context } from "@openzeppelin/contracts/utils/Context.sol";
@@ -73,9 +73,6 @@ abstract contract ERC7984 is IERC7984, Context, ERC165 {
 
     /// @dev The given caller `caller` is not authorized for the current operation.
     error ERC7984UnauthorizedCaller(address caller);
-
-    /// @dev The given gateway request ID `requestId` is invalid.
-    error ERC7984InvalidGatewayRequest(uint256 requestId);
 
     /// @dev Reverts when a cleartext ERC-20 function is called on a confidential token.
     error ERC7984IncompatibleFunction();
