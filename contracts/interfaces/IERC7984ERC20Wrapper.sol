@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 /**
  * @dev Interface for an {ERC7984} wrapper that shields an underlying ERC-20 token into a
@@ -14,7 +14,7 @@ import { euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
  */
 interface IERC7984ERC20Wrapper {
     /// @dev Emitted when an unshield request is created.
-    event Unshielded(address indexed to, bytes32 indexed unshieldRequestId, euint64 unshieldAmount);
+    event Unshielded(address indexed to, euint64 indexed amount);
 
     /// @dev Emitted when an unshield request is claimed (underlying tokens transferred).
     event ClaimedUnshielded(
@@ -36,14 +36,9 @@ interface IERC7984ERC20Wrapper {
      * @dev Initiates an unshield of confidential tokens from `from` and creates a pending unshield
      * request for `to`. The caller must be `from` or an operator for `from`.
      *
-     * Returns the unshield request ID (the cipher-text handle of the burned amount).
+     * Returns the encrypted amount that was burned.
      */
-    function unshield(address from, address to, euint64 amount) external returns (bytes32);
-
-    /**
-     * @dev Similar to {unshield-address-address-euint64} but accepts an encrypted input with proof.
-     */
-    function unshield(address from, address to, InEuint64 memory encryptedAmount) external returns (bytes32);
+    function unshield(address from, address to, uint64 amount) external returns (euint64);
 
     /**
      * @dev Claims a pending unshield request by verifying the decryption proof and transferring
@@ -60,10 +55,4 @@ interface IERC7984ERC20Wrapper {
 
     /// @dev Returns the address of the underlying ERC-20 token.
     function underlying() external view returns (address);
-
-    /// @dev Returns the encrypted amount associated with a given unshield request ID.
-    function unshieldAmount(bytes32 unshieldRequestId) external view returns (euint64);
-
-    /// @dev Returns the recipient address for a given unshield request ID, or `address(0)` if none exists.
-    function unshieldRequester(bytes32 unshieldRequestId) external view returns (address);
 }

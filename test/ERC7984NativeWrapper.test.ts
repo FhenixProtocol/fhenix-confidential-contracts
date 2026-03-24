@@ -1,7 +1,6 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
 import { ERC7984NativeWrapper_Harness, WETH_Harness } from "../typechain-types";
-import { Encryptable } from "@cofhe/sdk";
 import { expectERC7984BalancesChange, prepExpectERC7984BalancesChange } from "./utils";
 import { ZeroAddress, ContractTransactionResponse } from "ethers";
 
@@ -14,7 +13,7 @@ async function getUnshieldRequestId(
     try {
       const parsed = contract.interface.parseLog({ topics: log.topics as string[], data: log.data });
       if (parsed?.name === "Unshielded") {
-        return parsed.args.unshieldRequestId;
+        return parsed.args.amount;
       }
     } catch {}
   }
@@ -75,13 +74,6 @@ describe("ERC7984NativeWrapper", function () {
       expect(await eETH.supportsInterface("0x01ffc9a7")).to.equal(true);
       // Random unsupported
       expect(await eETH.supportsInterface("0xdeadbeef")).to.equal(false);
-    });
-
-    it("should allow symbol update", async function () {
-      const { eETH } = await setupFixture();
-
-      await expect(eETH.updateSymbol("encETH")).to.emit(eETH, "SymbolUpdated").withArgs("encETH");
-      expect(await eETH.symbol()).to.equal("encETH");
     });
   });
 
@@ -144,9 +136,10 @@ describe("ERC7984NativeWrapper", function () {
       await wETH.connect(bob).deposit({ value: dust });
       await wETH.connect(bob).approve(eETH.target, dust);
 
-      await expect(
-        eETH.connect(bob).shieldWrappedNative(bob, dust),
-      ).to.be.revertedWithCustomError(eETH, "AmountTooSmallForConfidentialPrecision");
+      await expect(eETH.connect(bob).shieldWrappedNative(bob, dust)).to.be.revertedWithCustomError(
+        eETH,
+        "AmountTooSmallForConfidentialPrecision",
+      );
     });
 
     it("should default to msg.sender when to is zero address", async function () {
@@ -201,9 +194,10 @@ describe("ERC7984NativeWrapper", function () {
 
       const dust = conversionRate - 1n;
 
-      await expect(
-        eETH.connect(bob).shieldNative(bob, { value: dust }),
-      ).to.be.revertedWithCustomError(eETH, "AmountTooSmallForConfidentialPrecision");
+      await expect(eETH.connect(bob).shieldNative(bob, { value: dust })).to.be.revertedWithCustomError(
+        eETH,
+        "AmountTooSmallForConfidentialPrecision",
+      );
     });
 
     it("should default to msg.sender when to is zero address", async function () {
@@ -237,20 +231,24 @@ describe("ERC7984NativeWrapper", function () {
       const unshieldConfidentialValue = 1_000_000n;
       const unshieldNativeValue = unshieldConfidentialValue * conversionRate; // 1e18
 
-      const [encAmount] = await bobClient.encryptInputs([Encryptable.uint64(unshieldConfidentialValue)]).execute();
-
       await prepExpectERC7984BalancesChange(eETH, bob.address);
 
-      const tx = await eETH
-        .connect(bob)
-        ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount);
+      const tx = await eETH.connect(bob).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eETH, "Unshielded");
       await expectERC7984BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eETH);
 
-      expect(await eETH.unshieldRequester(unshieldRequestId)).to.equal(alice.address);
+      // Verify claim was created via getClaim
+      const pendingClaim = await eETH.getClaim(unshieldRequestId);
+      expect(pendingClaim.to).to.equal(alice.address);
+      expect(pendingClaim.claimed).to.equal(false);
+
+      // Verify getUserClaims tracks the pending claim
+      const aliceClaims = await eETH.getUserClaims(alice.address);
+      expect(aliceClaims.length).to.equal(1);
+      expect(aliceClaims[0].ctHash).to.equal(unshieldRequestId);
 
       // Time travel past decryption delay
       await hre.network.provider.send("evm_increaseTime", [11]);
@@ -267,8 +265,12 @@ describe("ERC7984NativeWrapper", function () {
       const aliceBalanceAfter = await ethers.provider.getBalance(alice.address);
       expect(aliceBalanceAfter - aliceBalanceBefore).to.equal(unshieldNativeValue);
 
-      // Request is cleared
-      expect(await eETH.unshieldRequester(unshieldRequestId)).to.equal(ZeroAddress);
+      // Claim is marked as claimed and removed from user's pending claims
+      const claimedClaim = await eETH.getClaim(unshieldRequestId);
+      expect(claimedClaim.claimed).to.equal(true);
+
+      const aliceClaimsAfter = await eETH.getUserClaims(alice.address);
+      expect(aliceClaimsAfter.length).to.equal(0);
     });
 
     it("should allow unshield by operator", async function () {
@@ -280,13 +282,9 @@ describe("ERC7984NativeWrapper", function () {
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await eETH.connect(bob).setOperator(alice.address, timestamp);
 
-      const [encAmount] = await aliceClient.encryptInputs([Encryptable.uint64(unshieldConfidentialValue)]).execute();
-
       await prepExpectERC7984BalancesChange(eETH, bob.address);
 
-      const tx = await eETH
-        .connect(alice)
-        ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount);
+      const tx = await eETH.connect(alice).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eETH, "Unshielded");
       await expectERC7984BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
@@ -305,35 +303,72 @@ describe("ERC7984NativeWrapper", function () {
       const aliceBalanceAfter = await ethers.provider.getBalance(alice.address);
       expect(aliceBalanceAfter - aliceBalanceBefore).to.equal(unshieldNativeValue);
     });
+
+    it("should support batch claim", async function () {
+      const { eETH, bob, alice, bobClient } = await setupShieldedFixture();
+
+      const unshieldAmount1 = 500_000n;
+      const unshieldAmount2 = 300_000n;
+
+      // Create first unshield
+      const tx1 = await eETH.connect(bob).unshield(bob.address, alice.address, unshieldAmount1);
+      const requestId1 = await getUnshieldRequestId(tx1, eETH);
+
+      // Create second unshield
+      const tx2 = await eETH.connect(bob).unshield(bob.address, alice.address, unshieldAmount2);
+      const requestId2 = await getUnshieldRequestId(tx2, eETH);
+
+      // Alice should have 2 pending claims
+      const pendingClaims = await eETH.getUserClaims(alice.address);
+      expect(pendingClaims.length).to.equal(2);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const dec1 = await bobClient.decryptForTx(requestId1).withoutPermit().execute();
+      const dec2 = await bobClient.decryptForTx(requestId2).withoutPermit().execute();
+
+      const aliceBalanceBefore = await ethers.provider.getBalance(alice.address);
+
+      await eETH
+        .connect(bob)
+        .claimUnshieldedBatch(
+          [requestId1, requestId2],
+          [dec1.decryptedValue, dec2.decryptedValue],
+          [dec1.signature, dec2.signature],
+        );
+
+      const totalNativeValue = (unshieldAmount1 + unshieldAmount2) * conversionRate;
+      const aliceBalanceAfter = await ethers.provider.getBalance(alice.address);
+      expect(aliceBalanceAfter - aliceBalanceBefore).to.equal(totalNativeValue);
+
+      // All claims cleared
+      const claimsAfter = await eETH.getUserClaims(alice.address);
+      expect(claimsAfter.length).to.equal(0);
+    });
   });
 
   describe("unshield reverts", function () {
     it("should revert on zero address receiver", async function () {
-      const { eETH, bob, bobClient } = await setupFixture();
+      const { eETH, bob } = await setupFixture();
 
       await eETH.connect(bob).shieldNative(bob, { value: ethers.parseEther("10") });
 
-      const [encAmount] = await bobClient.encryptInputs([Encryptable.uint64(1_000_000n)]).execute();
-
-      await expect(
-        eETH
-          .connect(bob)
-          ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, ZeroAddress, encAmount),
-      ).to.be.revertedWithCustomError(eETH, "ERC7984InvalidReceiver");
+      await expect(eETH.connect(bob).unshield(bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
+        eETH,
+        "ERC7984InvalidReceiver",
+      );
     });
 
     it("should revert when caller is not operator", async function () {
-      const { eETH, bob, alice, aliceClient } = await setupFixture();
+      const { eETH, bob, alice } = await setupFixture();
 
       await eETH.connect(bob).shieldNative(bob, { value: ethers.parseEther("10") });
 
-      const [encAmount] = await aliceClient.encryptInputs([Encryptable.uint64(1_000_000n)]).execute();
-
-      await expect(
-        eETH
-          .connect(alice)
-          ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount),
-      ).to.be.revertedWithCustomError(eETH, "ERC7984UnauthorizedSpender");
+      await expect(eETH.connect(alice).unshield(bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
+        eETH,
+        "ERC7984UnauthorizedSpender",
+      );
     });
   });
 
@@ -341,9 +376,32 @@ describe("ERC7984NativeWrapper", function () {
     it("should revert on invalid request id", async function () {
       const { eETH } = await setupFixture();
 
+      await expect(eETH.claimUnshielded(ethers.ZeroHash, 0n, new Uint8Array(0))).to.be.revertedWithCustomError(
+        eETH,
+        "ClaimNotFound",
+      );
+    });
+
+    it("should revert when claiming already claimed request", async function () {
+      const { eETH, bob, alice, bobClient } = await setupFixture();
+
+      await eETH.connect(bob).shieldNative(bob, { value: ethers.parseEther("10") });
+
+      const tx = await eETH.connect(bob).unshield(bob.address, alice.address, 1_000_000n);
+      const requestId = await getUnshieldRequestId(tx, eETH);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await bobClient.decryptForTx(requestId).withoutPermit().execute();
+
+      // First claim succeeds
+      await eETH.connect(bob).claimUnshielded(requestId, decryption.decryptedValue, decryption.signature);
+
+      // Second claim reverts
       await expect(
-        eETH.claimUnshielded(ethers.ZeroHash, 0n, new Uint8Array(0)),
-      ).to.be.revertedWithCustomError(eETH, "InvalidUnshieldRequest");
+        eETH.connect(bob).claimUnshielded(requestId, decryption.decryptedValue, decryption.signature),
+      ).to.be.revertedWithCustomError(eETH, "AlreadyClaimed");
     });
   });
 });

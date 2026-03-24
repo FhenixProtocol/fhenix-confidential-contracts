@@ -12,11 +12,7 @@ contract ERC7984NativeWrapper_Harness is ERC7984NativeWrapper {
         string memory symbol_,
         string memory contractURI_
     )
-        ERC7984("", "", 0, contractURI_)
-        ERC7984NativeWrapper(weth_, name_, symbol_)
+        ERC7984(name_, symbol_, 0, contractURI_)
+        ERC7984NativeWrapper(weth_)
     {}
-
-    function updateSymbol(string memory updatedSymbol) public {
-        _updateSymbol(updatedSymbol);
-    }
 }

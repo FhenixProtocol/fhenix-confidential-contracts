@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { FHE, euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { FHE, euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+
 import { IERC1363Receiver } from "@openzeppelin/contracts/interfaces/IERC1363Receiver.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { IERC7984 } from "../../interfaces/IERC7984.sol";
 import { IERC7984ERC20Wrapper } from "../../interfaces/IERC7984ERC20Wrapper.sol";
 import { ERC7984 } from "../ERC7984.sol";
+import { ERC7984WrapperClaimHelper } from "../utils/ERC7984WrapperClaimHelper.sol";
 
 /**
  * @dev A wrapper contract built on top of {ERC7984} that allows shielding an `ERC20` token
@@ -20,25 +21,15 @@ import { ERC7984 } from "../ERC7984.sol";
  * WARNING: Minting assumes the full amount of the underlying token transfer has been received, hence some non-standard
  * tokens such as fee-on-transfer or other deflationary-type tokens are not supported by this wrapper.
  */
-abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363Receiver {
+abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363Receiver, ERC7984WrapperClaimHelper {
     IERC20 private immutable _underlying;
-
-    string private _wrappedName;
-    string private _wrappedSymbol;
     uint8 private immutable _wrappedDecimals;
     uint256 private immutable _rate;
 
-    mapping(bytes32 unshieldRequestId => address recipient) private _unshieldRequests;
-
-    error InvalidUnshieldRequest(bytes32 unshieldRequestId);
     error ERC7984TotalSupplyOverflow();
 
-    event SymbolUpdated(string symbol);
-
-    constructor(IERC20 underlying_, string memory name_, string memory symbol_) {
+    constructor(IERC20 underlying_) {
         _underlying = underlying_;
-        _wrappedName = name_;
-        _wrappedSymbol = symbol_;
 
         uint8 tokenDecimals = _tryGetAssetDecimals(underlying_);
         uint8 maxDecimals = _maxDecimals();
@@ -49,26 +40,6 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
             _wrappedDecimals = tokenDecimals;
             _rate = 1;
         }
-    }
-
-    /// @dev Returns the name for this wrapped token.
-    function name() public view virtual override returns (string memory) {
-        return _wrappedName;
-    }
-
-    /// @dev Returns the symbol for this wrapped token (auto-generated or overridden at construction).
-    function symbol() public view virtual override returns (string memory) {
-        return _wrappedSymbol;
-    }
-
-    /**
-     * @dev Updates the symbol of this wrapped token.
-     *
-     * NOTE: Access control should be implemented by the inheriting contract.
-     */
-    function _updateSymbol(string memory updatedSymbol) internal virtual {
-        _wrappedSymbol = updatedSymbol;
-        emit SymbolUpdated(updatedSymbol);
     }
 
     /**
@@ -109,39 +80,49 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
         return shieldedAmountSent;
     }
 
-    /// @dev Unshield without passing an input proof. See {unshield-address-address-InEuint64} for more details.
-    function unshield(address from, address to, euint64 amount) public virtual returns (bytes32) {
-        if (!FHE.isAllowed(amount, msg.sender)) revert ERC7984UnauthorizedUseOfEncryptedAmount(amount, msg.sender);
-        return _unshield(from, to, amount);
+    /**
+     * @dev Initiates an unshield of `amount` confidential tokens from `from`, creating a pending
+     * claim for `to`. The caller must be `from` or an operator for `from`.
+     *
+     * Returns the encrypted amount that was burned (used as the claim's cipher-text handle).
+     */
+    function unshield(address from, address to, uint64 amount) public virtual returns (euint64) {
+        if (to == address(0)) revert ERC7984InvalidReceiver(to);
+        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
+
+        euint64 unshieldAmount_ = _burn(from, FHE.asEuint64(amount));
+        FHE.allowPublic(unshieldAmount_);
+
+        _createClaim(to, amount, unshieldAmount_);
+
+        emit Unshielded(to, unshieldAmount_);
+        return unshieldAmount_;
     }
 
     /**
-     * @dev See {IERC7984ERC20Wrapper-unshield}. `amount * rate()` underlying tokens will be sent to `to`
-     * once the unshield request is claimed via {claimUnshielded}.
-     *
-     * NOTE: The unshield request created by this function must be finalized by calling {claimUnshielded}.
+     * @dev Claims a pending unshield request. Verifies the decryption proof and transfers
+     * `decryptedAmount * rate()` underlying tokens to the requester.
      */
-    function unshield(address from, address to, InEuint64 memory encryptedAmount) public virtual returns (bytes32) {
-        return _unshield(from, to, FHE.asEuint64(encryptedAmount));
+    function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionProof) public virtual {
+        Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionProof);
+        SafeERC20.safeTransfer(IERC20(underlying()), claim.to, uint256(claim.decryptedAmount) * rate());
+        emit ClaimedUnshielded(claim.to, ctHash, euint64.wrap(ctHash), claim.decryptedAmount);
     }
 
-    /// @inheritdoc IERC7984ERC20Wrapper
-    function claimUnshielded(
-        bytes32 unshieldRequestId,
-        uint64 unshieldAmountCleartext,
-        bytes calldata decryptionProof
+    /**
+     * @dev Claims multiple pending unshield requests in a single transaction.
+     */
+    function claimUnshieldedBatch(
+        bytes32[] memory ctHashes,
+        uint64[] memory decryptedAmounts,
+        bytes[] memory decryptionProofs
     ) public virtual {
-        address to = unshieldRequester(unshieldRequestId);
-        if (to == address(0)) revert InvalidUnshieldRequest(unshieldRequestId);
+        Claim[] memory claims = _handleClaimBatch(ctHashes, decryptedAmounts, decryptionProofs);
 
-        euint64 unshieldAmount_ = unshieldAmount(unshieldRequestId);
-        delete _unshieldRequests[unshieldRequestId];
-
-        FHE.verifyDecryptResult(unshieldAmount_, unshieldAmountCleartext, decryptionProof);
-
-        SafeERC20.safeTransfer(IERC20(underlying()), to, unshieldAmountCleartext * rate());
-
-        emit ClaimedUnshielded(to, unshieldRequestId, unshieldAmount_, unshieldAmountCleartext);
+        for (uint256 i = 0; i < claims.length; i++) {
+            SafeERC20.safeTransfer(IERC20(underlying()), claims[i].to, uint256(claims[i].decryptedAmount) * rate());
+            emit ClaimedUnshielded(claims[i].to, ctHashes[i], euint64.wrap(ctHashes[i]), claims[i].decryptedAmount);
+        }
     }
 
     /// @inheritdoc ERC7984
@@ -157,11 +138,6 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
     /// @inheritdoc IERC7984ERC20Wrapper
     function underlying() public view virtual override returns (address) {
         return address(_underlying);
-    }
-
-    /// @inheritdoc IERC7984ERC20Wrapper
-    function unshieldAmount(bytes32 unshieldRequestId) public view virtual returns (euint64) {
-        return euint64.wrap(unshieldRequestId);
     }
 
     /// @inheritdoc IERC165
@@ -190,14 +166,6 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
     }
 
     /**
-     * @dev Get the address that has a pending unshield request for the given `unshieldRequestId`.
-     * Returns `address(0)` if no pending unshield request exists.
-     */
-    function unshieldRequester(bytes32 unshieldRequestId) public view virtual returns (address) {
-        return _unshieldRequests[unshieldRequestId];
-    }
-
-    /**
      * @dev This function must revert if the new {confidentialTotalSupply} is invalid (overflow occurred).
      *
      * NOTE: Overflow can be detected here since the wrapper holdings are non-confidential. In other cases, it may be impossible
@@ -216,25 +184,6 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
             _checkConfidentialTotalSupply();
         }
         return super._update(from, to, amount);
-    }
-
-    /// @dev Internal logic for handling the creation of unshield requests. Returns the unshield request id.
-    function _unshield(address from, address to, euint64 amount) internal virtual returns (bytes32) {
-        if (to == address(0)) revert ERC7984InvalidReceiver(to);
-        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
-
-        euint64 unshieldAmount_ = _burn(from, amount);
-        FHE.allowPublic(unshieldAmount_);
-
-        assert(unshieldRequester(euint64.unwrap(unshieldAmount_)) == address(0));
-
-        // WARNING: Directly using the cipher-text as the unshield request id assumes that
-        // cipher-texts are unique--this holds here but is not always true.
-        bytes32 unshieldRequestId = euint64.unwrap(unshieldAmount_);
-        _unshieldRequests[unshieldRequestId] = to;
-
-        emit Unshielded(to, unshieldRequestId, unshieldAmount_);
-        return unshieldRequestId;
     }
 
     /**

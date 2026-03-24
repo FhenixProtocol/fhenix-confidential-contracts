@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { FHE, euint64, InEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { FHE, euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -9,6 +9,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { IERC7984NativeWrapper } from "../../interfaces/IERC7984NativeWrapper.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ERC7984 } from "../ERC7984.sol";
+import { ERC7984WrapperClaimHelper } from "../utils/ERC7984WrapperClaimHelper.sol";
 
 /**
  * @dev A wrapper contract built on top of {ERC7984} that shields a chain's native token
@@ -23,30 +24,19 @@ import { ERC7984 } from "../ERC7984.sol";
  * Confidential precision is capped at {_maxDecimals} (default 6). For 18-decimal native
  * tokens the conversion rate is 1e12, so 1 native unit = 1e-6 confidential units.
  */
-abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
+abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC7984WrapperClaimHelper {
     using SafeERC20 for IWETH;
 
     IWETH private immutable _weth;
     uint8 private immutable _wrappedDecimals;
     uint256 private immutable _rate;
 
-    string private _wrappedName;
-    string private _wrappedSymbol;
-
-    mapping(bytes32 unshieldRequestId => address recipient) private _unshieldRequests;
-
-    error InvalidUnshieldRequest(bytes32 unshieldRequestId);
     error ERC7984TotalSupplyOverflow();
     error NativeTransferFailed();
     error AmountTooSmallForConfidentialPrecision();
 
-    event SymbolUpdated(string symbol);
-
-    constructor(IWETH weth_, string memory name_, string memory symbol_) {
+    constructor(IWETH weth_) {
         _weth = weth_;
-
-        _wrappedName = name_;
-        _wrappedSymbol = symbol_;
 
         uint8 tokenDecimals = IERC20Metadata(address(weth_)).decimals();
         uint8 maxDecimals = _maxDecimals();
@@ -60,26 +50,6 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
     }
 
     receive() external payable {}
-
-    /// @dev Returns the name for this wrapped native token.
-    function name() public view virtual override returns (string memory) {
-        return _wrappedName;
-    }
-
-    /// @dev Returns the symbol for this wrapped native token.
-    function symbol() public view virtual override returns (string memory) {
-        return _wrappedSymbol;
-    }
-
-    /**
-     * @dev Updates the symbol of this wrapped token.
-     *
-     * NOTE: Access control should be implemented by the inheriting contract.
-     */
-    function _updateSymbol(string memory updatedSymbol) internal virtual {
-        _wrappedSymbol = updatedSymbol;
-        emit SymbolUpdated(updatedSymbol);
-    }
 
     /// @inheritdoc IERC7984NativeWrapper
     function shieldWrappedNative(address to, uint256 value) public virtual returns (euint64) {
@@ -122,41 +92,59 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
         return shieldedAmountSent;
     }
 
-    /// @dev Unshield without passing an input proof. See {unshield-address-address-InEuint64} for more details.
-    function unshield(address from, address to, euint64 amount) public virtual returns (bytes32) {
-        if (!FHE.isAllowed(amount, msg.sender)) revert ERC7984UnauthorizedUseOfEncryptedAmount(amount, msg.sender);
-        return _unshield(from, to, amount);
+    /**
+     * @dev Initiates an unshield of `amount` confidential tokens from `from`, creating a pending
+     * claim for `to`. The caller must be `from` or an operator for `from`.
+     *
+     * Returns the encrypted amount that was burned (used as the claim's cipher-text handle).
+     */
+    function unshield(address from, address to, uint64 amount) public virtual returns (euint64) {
+        if (to == address(0)) revert ERC7984InvalidReceiver(to);
+        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
+
+        euint64 unshieldAmount_ = _burn(from, FHE.asEuint64(amount));
+        FHE.allowPublic(unshieldAmount_);
+
+        _createClaim(to, amount, unshieldAmount_);
+
+        emit Unshielded(to, unshieldAmount_);
+        return unshieldAmount_;
     }
 
     /**
-     * @dev See {IERC7984NativeWrapper-unshield}. `amount * rate()` native tokens will be sent to `to`
-     * once the unshield request is claimed via {claimUnshielded}.
-     *
-     * NOTE: The unshield request created by this function must be finalized by calling {claimUnshielded}.
+     * @dev Claims a pending unshield request. Verifies the decryption proof and transfers
+     * `decryptedAmount * rate()` native tokens to the requester.
      */
-    function unshield(address from, address to, InEuint64 memory encryptedAmount) public virtual returns (bytes32) {
-        return _unshield(from, to, FHE.asEuint64(encryptedAmount));
-    }
-
-    /// @inheritdoc IERC7984NativeWrapper
     function claimUnshielded(
-        bytes32 unshieldRequestId,
-        uint64 unshieldAmountCleartext,
-        bytes calldata decryptionProof
+        bytes32 ctHash,
+        uint64 decryptedAmount,
+        bytes memory decryptionProof
     ) public virtual {
-        address to = unshieldRequester(unshieldRequestId);
-        if (to == address(0)) revert InvalidUnshieldRequest(unshieldRequestId);
+        Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionProof);
 
-        euint64 unshieldAmount_ = unshieldAmount(unshieldRequestId);
-        delete _unshieldRequests[unshieldRequestId];
-
-        FHE.verifyDecryptResult(unshieldAmount_, unshieldAmountCleartext, decryptionProof);
-
-        uint256 nativeAmount = uint256(unshieldAmountCleartext) * rate();
-        (bool sent, ) = to.call{ value: nativeAmount }("");
+        uint256 nativeAmount = uint256(claim.decryptedAmount) * rate();
+        (bool sent, ) = claim.to.call{ value: nativeAmount }("");
         if (!sent) revert NativeTransferFailed();
 
-        emit ClaimedUnshielded(to, unshieldRequestId, unshieldAmount_, unshieldAmountCleartext);
+        emit ClaimedUnshielded(claim.to, ctHash, euint64.wrap(ctHash), claim.decryptedAmount);
+    }
+
+    /**
+     * @dev Claims multiple pending unshield requests in a single transaction.
+     */
+    function claimUnshieldedBatch(
+        bytes32[] memory ctHashes,
+        uint64[] memory decryptedAmounts,
+        bytes[] memory decryptionProofs
+    ) public virtual {
+        Claim[] memory claims = _handleClaimBatch(ctHashes, decryptedAmounts, decryptionProofs);
+
+        for (uint256 i = 0; i < claims.length; i++) {
+            uint256 nativeAmount = uint256(claims[i].decryptedAmount) * rate();
+            (bool sent, ) = claims[i].to.call{ value: nativeAmount }("");
+            if (!sent) revert NativeTransferFailed();
+            emit ClaimedUnshielded(claims[i].to, ctHashes[i], euint64.wrap(ctHashes[i]), claims[i].decryptedAmount);
+        }
     }
 
     /// @inheritdoc ERC7984
@@ -172,11 +160,6 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
     /// @inheritdoc IERC7984NativeWrapper
     function weth() public view virtual returns (address) {
         return address(_weth);
-    }
-
-    /// @inheritdoc IERC7984NativeWrapper
-    function unshieldAmount(bytes32 unshieldRequestId) public view virtual returns (euint64) {
-        return euint64.wrap(unshieldRequestId);
     }
 
     /// @inheritdoc IERC165
@@ -204,14 +187,6 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
     }
 
     /**
-     * @dev Get the address that has a pending unshield request for the given `unshieldRequestId`.
-     * Returns `address(0)` if no pending unshield request exists.
-     */
-    function unshieldRequester(bytes32 unshieldRequestId) public view virtual returns (address) {
-        return _unshieldRequests[unshieldRequestId];
-    }
-
-    /**
      * @dev This function must revert if the new {confidentialTotalSupply} is invalid (overflow occurred).
      *
      * NOTE: Overflow can be detected here since the native balance is non-confidential.
@@ -229,23 +204,6 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper {
             _checkConfidentialTotalSupply();
         }
         return super._update(from, to, amount);
-    }
-
-    /// @dev Internal logic for handling the creation of unshield requests. Returns the unshield request id.
-    function _unshield(address from, address to, euint64 amount) internal virtual returns (bytes32) {
-        if (to == address(0)) revert ERC7984InvalidReceiver(to);
-        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
-
-        euint64 unshieldAmount_ = _burn(from, amount);
-        FHE.allowPublic(unshieldAmount_);
-
-        assert(unshieldRequester(euint64.unwrap(unshieldAmount_)) == address(0));
-
-        bytes32 unshieldRequestId = euint64.unwrap(unshieldAmount_);
-        _unshieldRequests[unshieldRequestId] = to;
-
-        emit Unshielded(to, unshieldRequestId, unshieldAmount_);
-        return unshieldRequestId;
     }
 
     /// @dev Returns the maximum number that will be used for {decimals} by the wrapper.

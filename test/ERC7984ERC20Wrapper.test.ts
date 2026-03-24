@@ -1,7 +1,6 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
 import { ERC7984ERC20Wrapper_Harness, ERC20_Harness } from "../typechain-types";
-import { Encryptable } from "@cofhe/sdk";
 import {
   expectERC20BalancesChange,
   expectERC7984BalancesChange,
@@ -19,7 +18,7 @@ async function getUnshieldRequestId(
     try {
       const parsed = contract.interface.parseLog({ topics: log.topics as string[], data: log.data });
       if (parsed?.name === "Unshielded") {
-        return parsed.args.unshieldRequestId;
+        return parsed.args.amount;
       }
     } catch {}
   }
@@ -82,13 +81,6 @@ describe("ERC7984ERC20Wrapper", function () {
       expect(await eBTC.supportsInterface("0x88a7ca5c")).to.equal(true);
       // Random unsupported
       expect(await eBTC.supportsInterface("0xdeadbeef")).to.equal(false);
-    });
-
-    it("should allow symbol update", async function () {
-      const { eBTC } = await setupFixture();
-
-      await expect(eBTC.updateSymbol("encBTC")).to.emit(eBTC, "SymbolUpdated").withArgs("encBTC");
-      expect(await eBTC.symbol()).to.equal("encBTC");
     });
   });
 
@@ -190,20 +182,24 @@ describe("ERC7984ERC20Wrapper", function () {
       const unshieldConfidentialValue = 1_000_000n;
       const unshieldERC20Value = unshieldConfidentialValue * conversionRate; // 1e8
 
-      const [encAmount] = await bobClient.encryptInputs([Encryptable.uint64(unshieldConfidentialValue)]).execute();
-
       await prepExpectERC7984BalancesChange(eBTC, bob.address);
 
-      const tx = await eBTC
-        .connect(bob)
-        ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount);
+      const tx = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
       await expectERC7984BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eBTC);
 
-      expect(await eBTC.unshieldRequester(unshieldRequestId)).to.equal(alice.address);
+      // Verify claim was created via getClaim
+      const pendingClaim = await eBTC.getClaim(unshieldRequestId);
+      expect(pendingClaim.to).to.equal(alice.address);
+      expect(pendingClaim.claimed).to.equal(false);
+
+      // Verify getUserClaims tracks the pending claim
+      const aliceClaims = await eBTC.getUserClaims(alice.address);
+      expect(aliceClaims.length).to.equal(1);
+      expect(aliceClaims[0].ctHash).to.equal(unshieldRequestId);
 
       // Time travel past decryption delay
       await hre.network.provider.send("evm_increaseTime", [11]);
@@ -219,8 +215,12 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await expectERC20BalancesChange(wBTC, alice.address, unshieldERC20Value);
 
-      // Request is cleared
-      expect(await eBTC.unshieldRequester(unshieldRequestId)).to.equal(ZeroAddress);
+      // Claim is marked as claimed and removed from user's pending claims
+      const claimedClaim = await eBTC.getClaim(unshieldRequestId);
+      expect(claimedClaim.claimed).to.equal(true);
+
+      const aliceClaimsAfter = await eBTC.getUserClaims(alice.address);
+      expect(aliceClaimsAfter.length).to.equal(0);
     });
 
     it("should allow unshield by operator", async function () {
@@ -232,13 +232,9 @@ describe("ERC7984ERC20Wrapper", function () {
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await eBTC.connect(bob).setOperator(alice.address, timestamp);
 
-      const [encAmount] = await aliceClient.encryptInputs([Encryptable.uint64(unshieldConfidentialValue)]).execute();
-
       await prepExpectERC7984BalancesChange(eBTC, bob.address);
 
-      const tx = await eBTC
-        .connect(alice)
-        ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount);
+      const tx = await eBTC.connect(alice).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
       await expectERC7984BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
@@ -256,41 +252,77 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await expectERC20BalancesChange(wBTC, alice.address, unshieldERC20Value);
     });
+
+    it("should support batch claim", async function () {
+      const { eBTC, bob, alice, wBTC, bobClient } = await setupShieldedFixture();
+
+      const unshieldAmount1 = 500_000n;
+      const unshieldAmount2 = 300_000n;
+
+      // Create first unshield
+      const tx1 = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldAmount1);
+      const requestId1 = await getUnshieldRequestId(tx1, eBTC);
+
+      // Create second unshield
+      const tx2 = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldAmount2);
+      const requestId2 = await getUnshieldRequestId(tx2, eBTC);
+
+      // Alice should have 2 pending claims
+      const pendingClaims = await eBTC.getUserClaims(alice.address);
+      expect(pendingClaims.length).to.equal(2);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const dec1 = await bobClient.decryptForTx(requestId1).withoutPermit().execute();
+      const dec2 = await bobClient.decryptForTx(requestId2).withoutPermit().execute();
+
+      await prepExpectERC20BalancesChange(wBTC, alice.address);
+
+      await eBTC
+        .connect(bob)
+        .claimUnshieldedBatch(
+          [requestId1, requestId2],
+          [dec1.decryptedValue, dec2.decryptedValue],
+          [dec1.signature, dec2.signature],
+        );
+
+      const totalERC20Value = (unshieldAmount1 + unshieldAmount2) * conversionRate;
+      await expectERC20BalancesChange(wBTC, alice.address, totalERC20Value);
+
+      // All claims cleared
+      const claimsAfter = await eBTC.getUserClaims(alice.address);
+      expect(claimsAfter.length).to.equal(0);
+    });
   });
 
   describe("unshield reverts", function () {
     it("should revert on zero address receiver", async function () {
-      const { eBTC, bob, wBTC, bobClient } = await setupFixture();
+      const { eBTC, bob, wBTC } = await setupFixture();
 
       const mintValue = BigInt(10e8);
       await wBTC.mint(bob, mintValue);
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
       await eBTC.connect(bob).shield(bob, mintValue);
 
-      const [encAmount] = await bobClient.encryptInputs([Encryptable.uint64(1_000_000n)]).execute();
-
-      await expect(
-        eBTC
-          .connect(bob)
-          ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, ZeroAddress, encAmount),
-      ).to.be.revertedWithCustomError(eBTC, "ERC7984InvalidReceiver");
+      await expect(eBTC.connect(bob).unshield(bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
+        eBTC,
+        "ERC7984InvalidReceiver",
+      );
     });
 
     it("should revert when caller is not operator", async function () {
-      const { eBTC, bob, alice, wBTC, aliceClient } = await setupFixture();
+      const { eBTC, bob, alice, wBTC } = await setupFixture();
 
       const mintValue = BigInt(10e8);
       await wBTC.mint(bob, mintValue);
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
       await eBTC.connect(bob).shield(bob, mintValue);
 
-      const [encAmount] = await aliceClient.encryptInputs([Encryptable.uint64(1_000_000n)]).execute();
-
-      await expect(
-        eBTC
-          .connect(alice)
-          ["unshield(address,address,(uint256,uint8,uint8,bytes))"](bob.address, alice.address, encAmount),
-      ).to.be.revertedWithCustomError(eBTC, "ERC7984UnauthorizedSpender");
+      await expect(eBTC.connect(alice).unshield(bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
+        eBTC,
+        "ERC7984UnauthorizedSpender",
+      );
     });
   });
 
@@ -298,9 +330,35 @@ describe("ERC7984ERC20Wrapper", function () {
     it("should revert on invalid request id", async function () {
       const { eBTC } = await setupFixture();
 
+      await expect(eBTC.claimUnshielded(ethers.ZeroHash, 0n, new Uint8Array(0))).to.be.revertedWithCustomError(
+        eBTC,
+        "ClaimNotFound",
+      );
+    });
+
+    it("should revert when claiming already claimed request", async function () {
+      const { eBTC, bob, alice, wBTC, bobClient } = await setupFixture();
+
+      const mintValue = BigInt(10e8);
+      await wBTC.mint(bob, mintValue);
+      await wBTC.connect(bob).approve(eBTC.target, mintValue);
+      await eBTC.connect(bob).shield(bob, mintValue);
+
+      const tx = await eBTC.connect(bob).unshield(bob.address, alice.address, 1_000_000n);
+      const requestId = await getUnshieldRequestId(tx, eBTC);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await bobClient.decryptForTx(requestId).withoutPermit().execute();
+
+      // First claim succeeds
+      await eBTC.connect(bob).claimUnshielded(requestId, decryption.decryptedValue, decryption.signature);
+
+      // Second claim reverts
       await expect(
-        eBTC.claimUnshielded(ethers.ZeroHash, 0n, new Uint8Array(0)),
-      ).to.be.revertedWithCustomError(eBTC, "InvalidUnshieldRequest");
+        eBTC.connect(bob).claimUnshielded(requestId, decryption.decryptedValue, decryption.signature),
+      ).to.be.revertedWithCustomError(eBTC, "AlreadyClaimed");
     });
   });
 
