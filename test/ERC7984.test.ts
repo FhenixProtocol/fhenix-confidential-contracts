@@ -641,6 +641,220 @@ describe("ERC7984", function () {
       );
     });
   });
+
+  describe("ERC-20 indicator", function () {
+    // Token has 6 decimals → tick = 10^(6-4) = 100
+    const tick = 100n;
+    const base = 79_840_000n * tick; // 7984.000000
+    const transferVal = 79_840_001n * tick; // 7984.000100
+
+    it("should return 0 for accounts that have never interacted", async function () {
+      const { token, bob } = await setupFixture();
+
+      expect(await token.balanceOf(bob.address)).to.equal(0n);
+    });
+
+    it("should return base + 1 tick after first receive (mint)", async function () {
+      const { token, bob } = await setupFixture();
+
+      await token.mint(bob.address, 1_000_000n);
+
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick);
+    });
+
+    it("should increment on receive and decrement on send", async function () {
+      const { token, bob, alice, bobClient } = await setupFixture();
+
+      await token.mint(bob.address, 5_000_000n);
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick);
+
+      // Transfer bob → alice: bob decrements, alice initialises
+      const [enc] = await bobClient.encryptInputs([Encryptable.uint64(1_000_000n)]).execute();
+      await token.connect(bob)["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, enc);
+
+      expect(await token.balanceOf(bob.address)).to.equal(base); // 7984.0000
+      expect(await token.balanceOf(alice.address)).to.equal(base + tick); // 7984.0001
+    });
+
+    it("should go below base (7983.9999) after more sends than receives", async function () {
+      const { token, bob, alice, bobClient } = await setupFixture();
+
+      // 1 receive (mint)
+      await token.mint(bob.address, 5_000_000n);
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick); // 7984.0001
+
+      // 4 sends → net = 1 receive - 4 sends = indicator at base - 3
+      for (let i = 0; i < 4; i++) {
+        const [enc] = await bobClient.encryptInputs([Encryptable.uint64(100_000n)]).execute();
+        await token.connect(bob)["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, enc);
+      }
+
+      // 79840001 - 4 = 79839997 → 7983.9997 in display
+      expect(await token.balanceOf(bob.address)).to.equal(79_839_997n * tick);
+    });
+
+    it("should emit Transfer event with 7984.0001 value", async function () {
+      const { token, bob } = await setupFixture();
+
+      await expect(token.mint(bob.address, 1_000_000n))
+        .to.emit(token, "Transfer")
+        .withArgs(ZeroAddress, bob.address, transferVal);
+    });
+
+    it("should track totalSupply indicator on mint and burn", async function () {
+      const { token, bob } = await setupFixture();
+
+      expect(await token.totalSupply()).to.equal(0n);
+
+      await token.mint(bob.address, 1_000_000n);
+      expect(await token.totalSupply()).to.equal(base + tick);
+
+      await token.mint(bob.address, 1_000_000n);
+      expect(await token.totalSupply()).to.equal(base + 2n * tick);
+
+      await token.burn(bob.address, 500_000n);
+      expect(await token.totalSupply()).to.equal(base + tick);
+    });
+
+    it("should report balanceOfIsIndicator as true", async function () {
+      const { token } = await setupFixture();
+      expect(await token.balanceOfIsIndicator()).to.equal(true);
+    });
+
+    it("should report correct indicatorTick for 6 decimals", async function () {
+      const { token } = await setupFixture();
+      expect(await token.indicatorTick()).to.equal(tick);
+    });
+
+    it("should reset indicated balance to 0", async function () {
+      const { token, bob } = await setupFixture();
+
+      await token.mint(bob.address, 1_000_000n);
+      expect(await token.balanceOf(bob.address)).to.not.equal(0n);
+
+      await token.connect(bob).resetIndicatedBalance();
+      expect(await token.balanceOf(bob.address)).to.equal(0n);
+    });
+
+    it("should revert on ERC-20 transfer", async function () {
+      const { token, bob, alice } = await setupFixture();
+      await expect(token.connect(bob).transfer(alice.address, 1n)).to.be.revertedWithCustomError(
+        token,
+        "ERC7984IncompatibleFunction",
+      );
+    });
+
+    it("should revert on ERC-20 transferFrom", async function () {
+      const { token, bob, alice } = await setupFixture();
+      await expect(token.connect(bob).transferFrom(bob.address, alice.address, 1n)).to.be.revertedWithCustomError(
+        token,
+        "ERC7984IncompatibleFunction",
+      );
+    });
+
+    it("should revert on ERC-20 approve", async function () {
+      const { token, bob, alice } = await setupFixture();
+      await expect(token.connect(bob).approve(alice.address, 1n)).to.be.revertedWithCustomError(
+        token,
+        "ERC7984IncompatibleFunction",
+      );
+    });
+
+    it("should revert on ERC-20 allowance", async function () {
+      const { token, bob, alice } = await setupFixture();
+      await expect(token.allowance(bob.address, alice.address)).to.be.revertedWithCustomError(
+        token,
+        "ERC7984IncompatibleFunction",
+      );
+    });
+
+    it("should support IERC20 interface", async function () {
+      const { token } = await setupFixture();
+      // IERC20 interfaceId = 0x36372b07
+      expect(await token.supportsInterface("0x36372b07")).to.equal(true);
+    });
+  });
+
+  describe("ERC-20 indicator across decimal values", function () {
+    async function deployWithDecimals(decimals: number) {
+      const factory = await ethers.getContractFactory("ERC7984_Harness");
+      const token = (await factory.deploy("Test", "T", decimals, "")) as ERC7984_Harness;
+      await token.waitForDeployment();
+      return token;
+    }
+
+    it("should work with 18 decimals (tick = 1e14)", async function () {
+      const [, bob, alice] = await ethers.getSigners();
+      const bobClient = await hre.cofhe.createClientWithBatteries(bob);
+      const token = await deployWithDecimals(18);
+
+      const tick = 10n ** 14n; // 10^(18-4)
+      const base = 79_840_000n * tick;
+
+      expect(await token.indicatorTick()).to.equal(tick);
+      expect(await token.balanceOf(bob.address)).to.equal(0n);
+
+      await token.mint(bob.address, 1_000_000n);
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick);
+
+      const [enc] = await bobClient.encryptInputs([Encryptable.uint64(100_000n)]).execute();
+      await token.connect(bob)["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, enc);
+
+      expect(await token.balanceOf(bob.address)).to.equal(base); // 7984.000000000000000000
+      expect(await token.balanceOf(alice.address)).to.equal(base + tick); // 7984.000100000000000000
+    });
+
+    it("should work with 6 decimals (tick = 100)", async function () {
+      const [, bob] = await ethers.getSigners();
+      const token = await deployWithDecimals(6);
+
+      const tick = 100n; // 10^(6-4)
+      const base = 79_840_000n * tick;
+
+      expect(await token.indicatorTick()).to.equal(tick);
+
+      await token.mint(bob.address, 500_000n);
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick);
+    });
+
+    it("should work with 4 decimals (tick = 1)", async function () {
+      const [, bob] = await ethers.getSigners();
+      const token = await deployWithDecimals(4);
+
+      const tick = 1n; // decimals <= 4 → tick = 1
+      const base = 79_840_000n * tick;
+
+      expect(await token.indicatorTick()).to.equal(tick);
+
+      await token.mint(bob.address, 500n);
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick); // 7984.0001
+    });
+
+    it("should work with 2 decimals (tick = 1)", async function () {
+      const [, bob] = await ethers.getSigners();
+      const token = await deployWithDecimals(2);
+
+      const tick = 1n; // decimals <= 4 → tick = 1
+      const base = 79_840_000n * tick;
+
+      expect(await token.indicatorTick()).to.equal(tick);
+
+      await token.mint(bob.address, 50n);
+      // Displays as 798400.01 with 2 decimals — the "7984" prefix is in the integer part
+      expect(await token.balanceOf(bob.address)).to.equal(base + tick);
+    });
+
+    it("should work with 0 decimals (tick = 1)", async function () {
+      const [, bob] = await ethers.getSigners();
+      const token = await deployWithDecimals(0);
+
+      expect(await token.indicatorTick()).to.equal(1n);
+
+      await token.mint(bob.address, 1n);
+      // Raw integer 79840001 — no decimal point
+      expect(await token.balanceOf(bob.address)).to.equal(79_840_001n);
+    });
+  });
 });
 
 async function getIERC7984InterfaceId(): Promise<string> {
@@ -651,6 +865,8 @@ async function getIERC7984InterfaceId(): Promise<string> {
     "contractURI()",
     "confidentialTotalSupply()",
     "confidentialBalanceOf(address)",
+    "balanceOfIsIndicator()",
+    "indicatorTick()",
     "isOperator(address,address)",
     "setOperator(address,uint48)",
     "confidentialTransfer(address,(uint256,uint8,uint8,bytes))",
