@@ -1,6 +1,6 @@
 {
   "name": "fhenix-confidential-contracts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Privacy-preserving FHERC-20 token standard for Fhenix Protocol",
   "license": "MIT",
   "author": "fhenixprotocol",
