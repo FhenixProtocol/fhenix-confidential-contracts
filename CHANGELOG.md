@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Patch Changes
+
+- e31b762: Add ERC7984 confidential token standard.
+
 ## 0.2.0
 
 ### Minor Changes
