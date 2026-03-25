@@ -30,7 +30,7 @@ abstract contract ERC7984WrapperClaimHelper {
     error LengthMismatch();
 
     function _createClaim(address to, uint64 requestedAmount, euint64 claimable) internal {
-        bytes32 unwrappedHash = euint64.unwrap(claimable);
+        bytes32 unwrappedHash = FHE.unwrap(claimable);
         _claims[unwrappedHash] = Claim({
             to: to,
             ctHash: unwrappedHash,
@@ -51,7 +51,7 @@ abstract contract ERC7984WrapperClaimHelper {
         if (claim.to == address(0)) revert ClaimNotFound();
         if (claim.claimed) revert AlreadyClaimed();
 
-        FHE.verifyDecryptResult(euint64.wrap(ctHash), decryptedAmount, decryptionProof);
+        FHE.verifyDecryptResult(FHE.wrapEuint64(ctHash), decryptedAmount, decryptionProof);
 
         claim.decryptedAmount = decryptedAmount;
         claim.claimed = true;

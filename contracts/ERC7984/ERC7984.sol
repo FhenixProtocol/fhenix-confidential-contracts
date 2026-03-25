@@ -375,7 +375,7 @@ abstract contract ERC7984 is IERC7984, Context, ERC165 {
             _indicatedTotalSupply = _incrementIndicator(_indicatedTotalSupply);
         } else {
             euint64 fromBalance = _balances[from];
-            if (euint64.unwrap(fromBalance) == 0) revert ERC7984ZeroBalance(from);
+            if (!FHE.isInitialized(fromBalance)) revert ERC7984ZeroBalance(from);
             (success, ptr) = FHESafeMath.tryDecrease(fromBalance, amount);
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);

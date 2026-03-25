@@ -106,7 +106,7 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
     function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionProof) public virtual {
         Claim memory claim = _handleClaim(ctHash, decryptedAmount, decryptionProof);
         SafeERC20.safeTransfer(IERC20(underlying()), claim.to, uint256(claim.decryptedAmount) * rate());
-        emit ClaimedUnshielded(claim.to, ctHash, euint64.wrap(ctHash), claim.decryptedAmount);
+        emit ClaimedUnshielded(claim.to, ctHash, FHE.wrapEuint64(ctHash), claim.decryptedAmount);
     }
 
     /**
@@ -121,7 +121,7 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
 
         for (uint256 i = 0; i < claims.length; i++) {
             SafeERC20.safeTransfer(IERC20(underlying()), claims[i].to, uint256(claims[i].decryptedAmount) * rate());
-            emit ClaimedUnshielded(claims[i].to, ctHashes[i], euint64.wrap(ctHashes[i]), claims[i].decryptedAmount);
+            emit ClaimedUnshielded(claims[i].to, ctHashes[i], FHE.wrapEuint64(ctHashes[i]), claims[i].decryptedAmount);
         }
     }
 

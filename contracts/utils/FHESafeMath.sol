@@ -7,7 +7,7 @@ import { FHE, ebool, euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
  * @dev Library providing safe arithmetic operations for encrypted values
  * to handle potential overflows in FHE operations.
  *
- * NOTE: An uninitialized `euint64` value (equivalent to euint64.wrap(bytes32(0))) is evaluated as 0.
+ * NOTE: An uninitialized `euint64` value is evaluated as 0.
  * This library may return an uninitialized value if all inputs are uninitialized.
  */
 library FHESafeMath {
@@ -17,7 +17,7 @@ library FHESafeMath {
      * and `updated` will be the original value.
      */
     function tryIncrease(euint64 oldValue, euint64 delta) internal returns (ebool success, euint64 updated) {
-        if (euint64.unwrap(oldValue) == 0) {
+        if (!FHE.isInitialized(oldValue)) {
             return (FHE.asEbool(true), delta);
         }
         euint64 newValue = FHE.add(oldValue, delta);
@@ -31,8 +31,8 @@ library FHESafeMath {
      * and `updated` will be the original value.
      */
     function tryDecrease(euint64 oldValue, euint64 delta) internal returns (ebool success, euint64 updated) {
-        if (euint64.unwrap(oldValue) == 0) {
-            if (euint64.unwrap(delta) == 0) {
+        if (!FHE.isInitialized(oldValue)) {
+            if (!FHE.isInitialized(delta)) {
                 return (FHE.asEbool(true), oldValue);
             }
             return (FHE.eq(delta, FHE.asEuint64(0)), FHE.asEuint64(0));
@@ -46,10 +46,10 @@ library FHESafeMath {
      * will be the sum of `a` and `b`. Otherwise, `success` will be false, and `res` will be 0.
      */
     function tryAdd(euint64 a, euint64 b) internal returns (ebool success, euint64 res) {
-        if (euint64.unwrap(a) == 0) {
+        if (!FHE.isInitialized(a)) {
             return (FHE.asEbool(true), b);
         }
-        if (euint64.unwrap(b) == 0) {
+        if (!FHE.isInitialized(b)) {
             return (FHE.asEbool(true), a);
         }
 
@@ -63,7 +63,7 @@ library FHESafeMath {
      * will be `a - b`. Otherwise, `success` will be false, and `res` will be 0.
      */
     function trySub(euint64 a, euint64 b) internal returns (ebool success, euint64 res) {
-        if (euint64.unwrap(b) == 0) {
+        if (!FHE.isInitialized(b)) {
             return (FHE.asEbool(true), a);
         }
 

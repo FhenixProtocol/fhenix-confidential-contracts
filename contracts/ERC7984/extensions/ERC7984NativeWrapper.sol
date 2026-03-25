@@ -126,7 +126,7 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
         (bool sent, ) = claim.to.call{ value: nativeAmount }("");
         if (!sent) revert NativeTransferFailed();
 
-        emit ClaimedUnshielded(claim.to, ctHash, euint64.wrap(ctHash), claim.decryptedAmount);
+        emit ClaimedUnshielded(claim.to, ctHash, FHE.wrapEuint64(ctHash), claim.decryptedAmount);
     }
 
     /**
@@ -143,7 +143,7 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
             uint256 nativeAmount = uint256(claims[i].decryptedAmount) * rate();
             (bool sent, ) = claims[i].to.call{ value: nativeAmount }("");
             if (!sent) revert NativeTransferFailed();
-            emit ClaimedUnshielded(claims[i].to, ctHashes[i], euint64.wrap(ctHashes[i]), claims[i].decryptedAmount);
+            emit ClaimedUnshielded(claims[i].to, ctHashes[i], FHE.wrapEuint64(ctHashes[i]), claims[i].decryptedAmount);
         }
     }
 
