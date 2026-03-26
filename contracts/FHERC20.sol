@@ -440,7 +440,7 @@ abstract contract FHERC20 is IFHERC20, IFHERC20Errors, Context {
         FHE.allowThis(_encTotalSupply);
 
         emit Transfer(from, to, _indicatorTick);
-        emit ConfidentialTransfer(from, to, euint64.unwrap(transferred));
+        emit ConfidentialTransfer(from, to, bytes32(euint64.unwrap(transferred)));
     }
 
     /**
