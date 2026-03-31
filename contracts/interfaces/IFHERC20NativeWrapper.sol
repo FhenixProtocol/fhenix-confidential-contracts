@@ -4,8 +4,8 @@ pragma solidity ^0.8.25;
 import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 /**
- * @dev Interface for an {ERC7984} wrapper that shields a chain's native token (e.g. ETH)
- * into a confidential {ERC7984} token.
+ * @dev Interface for an {FHERC20} wrapper that shields a chain's native token (e.g. ETH)
+ * into a confidential {FHERC20} token.
  *
  * Two shield entry-points are provided:
  *  - {shieldWrappedNative}: pulls WETH from the caller, unwraps it, and mints confidential tokens.
@@ -15,7 +15,7 @@ import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
  * decrypt request, then {claimUnshielded} verifies the decryption proof and transfers native
  * tokens to the recipient.
  */
-interface IERC7984NativeWrapper {
+interface IFHERC20NativeWrapper {
     /// @dev Emitted when native or wrapped-native tokens are shielded.
     event ShieldedNative(address indexed from, address indexed to, uint256 value);
 

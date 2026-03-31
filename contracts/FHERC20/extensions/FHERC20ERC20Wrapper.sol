@@ -9,24 +9,24 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { IERC7984ERC20Wrapper } from "../../interfaces/IERC7984ERC20Wrapper.sol";
-import { ERC7984 } from "../ERC7984.sol";
-import { ERC7984WrapperClaimHelper } from "../utils/ERC7984WrapperClaimHelper.sol";
+import { IFHERC20ERC20Wrapper } from "../../interfaces/IFHERC20ERC20Wrapper.sol";
+import { FHERC20 } from "../FHERC20.sol";
+import { FHERC20WrapperClaimHelper } from "../utils/FHERC20WrapperClaimHelper.sol";
 
 /**
- * @dev A wrapper contract built on top of {ERC7984} that allows shielding an `ERC20` token
- * into an `ERC7984` token. The wrapper contract implements the `IERC1363Receiver` interface
+ * @dev A wrapper contract built on top of {FHERC20} that allows shielding an `ERC20` token
+ * into an `FHERC20` token. The wrapper contract implements the `IERC1363Receiver` interface
  * which allows users to transfer `ERC1363` tokens directly to the wrapper with a callback to shield the tokens.
  *
  * WARNING: Minting assumes the full amount of the underlying token transfer has been received, hence some non-standard
  * tokens such as fee-on-transfer or other deflationary-type tokens are not supported by this wrapper.
  */
-abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363Receiver, ERC7984WrapperClaimHelper {
+abstract contract FHERC20ERC20Wrapper is FHERC20, IFHERC20ERC20Wrapper, IERC1363Receiver, FHERC20WrapperClaimHelper {
     IERC20 private immutable _underlying;
     uint8 private immutable _wrappedDecimals;
     uint256 private immutable _rate;
 
-    error ERC7984TotalSupplyOverflow();
+    error FHERC20TotalSupplyOverflow();
 
     constructor(IERC20 underlying_) {
         _underlying = underlying_;
@@ -53,7 +53,7 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
         uint256 amount,
         bytes calldata data
     ) public virtual returns (bytes4) {
-        if (underlying() != msg.sender) revert ERC7984UnauthorizedCaller(msg.sender);
+        if (underlying() != msg.sender) revert FHERC20UnauthorizedCaller(msg.sender);
 
         address to = data.length < 20 ? from : address(bytes20(data));
         _mint(to, FHE.asEuint64(SafeCast.toUint64(amount / rate())));
@@ -65,7 +65,7 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
     }
 
     /**
-     * @dev See {IERC7984ERC20Wrapper-shield}. Tokens are exchanged at a fixed rate specified by {rate} such that
+     * @dev See {IFHERC20ERC20Wrapper-shield}. Tokens are exchanged at a fixed rate specified by {rate} such that
      * `amount / rate()` confidential tokens are sent. The amount transferred in is rounded down to the nearest
      * multiple of {rate}.
      *
@@ -87,8 +87,8 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
      * Returns the encrypted amount that was burned (used as the claim's cipher-text handle).
      */
     function unshield(address from, address to, uint64 amount) public virtual returns (euint64) {
-        if (to == address(0)) revert ERC7984InvalidReceiver(to);
-        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
+        if (to == address(0)) revert FHERC20InvalidReceiver(to);
+        if (from != msg.sender && !isOperator(from, msg.sender)) revert FHERC20UnauthorizedSpender(from, msg.sender);
 
         euint64 unshieldAmount_ = _burn(from, FHE.asEuint64(amount));
         FHE.allowPublic(unshieldAmount_);
@@ -125,17 +125,17 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
         }
     }
 
-    /// @inheritdoc ERC7984
+    /// @inheritdoc FHERC20
     function decimals() public view virtual override returns (uint8) {
         return _wrappedDecimals;
     }
 
-    /// @inheritdoc IERC7984ERC20Wrapper
+    /// @inheritdoc IFHERC20ERC20Wrapper
     function rate() public view virtual returns (uint256) {
         return _rate;
     }
 
-    /// @inheritdoc IERC7984ERC20Wrapper
+    /// @inheritdoc IFHERC20ERC20Wrapper
     function underlying() public view virtual override returns (address) {
         return address(_underlying);
     }
@@ -143,7 +143,7 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return
-            interfaceId == type(IERC7984ERC20Wrapper).interfaceId ||
+            interfaceId == type(IFHERC20ERC20Wrapper).interfaceId ||
             interfaceId == type(IERC1363Receiver).interfaceId ||
             super.supportsInterface(interfaceId);
     }
@@ -174,11 +174,11 @@ abstract contract ERC7984ERC20Wrapper is ERC7984, IERC7984ERC20Wrapper, IERC1363
      */
     function _checkConfidentialTotalSupply() internal virtual {
         if (inferredTotalSupply() > maxTotalSupply()) {
-            revert ERC7984TotalSupplyOverflow();
+            revert FHERC20TotalSupplyOverflow();
         }
     }
 
-    /// @inheritdoc ERC7984
+    /// @inheritdoc FHERC20
     function _update(address from, address to, euint64 amount) internal virtual override returns (euint64) {
         if (from == address(0)) {
             _checkConfidentialTotalSupply();

@@ -1,12 +1,12 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
-import { ERC7984NativeWrapper_Harness, WETH_Harness } from "../typechain-types";
-import { expectERC7984BalancesChange, prepExpectERC7984BalancesChange } from "./utils";
+import { FHERC20NativeWrapper_Harness, WETH_Harness } from "../typechain-types";
+import { expectFHERC20BalancesChange, prepExpectFHERC20BalancesChange } from "./utils";
 import { ZeroAddress, ContractTransactionResponse } from "ethers";
 
 async function getUnshieldRequestId(
   tx: ContractTransactionResponse,
-  contract: ERC7984NativeWrapper_Harness,
+  contract: FHERC20NativeWrapper_Harness,
 ): Promise<string> {
   const receipt = await tx.wait();
   for (const log of receipt!.logs) {
@@ -20,19 +20,19 @@ async function getUnshieldRequestId(
   throw new Error("Unshielded event not found");
 }
 
-describe("ERC7984NativeWrapper", function () {
+describe("FHERC20NativeWrapper", function () {
   const deployContracts = async () => {
     const wETHFactory = await ethers.getContractFactory("WETH_Harness");
     const wETH = (await wETHFactory.deploy()) as WETH_Harness;
     await wETH.waitForDeployment();
 
-    const eETHFactory = await ethers.getContractFactory("ERC7984NativeWrapper_Harness");
+    const eETHFactory = await ethers.getContractFactory("FHERC20NativeWrapper_Harness");
     const eETH = (await eETHFactory.deploy(
       wETH.target,
-      "ERC7984 Wrapped ETH",
+      "FHERC20 Wrapped ETH",
       "eETH",
       "https://example.com/eeth.json",
-    )) as ERC7984NativeWrapper_Harness;
+    )) as FHERC20NativeWrapper_Harness;
     await eETH.waitForDeployment();
 
     return { wETH, eETH };
@@ -57,7 +57,7 @@ describe("ERC7984NativeWrapper", function () {
     it("should be constructed correctly", async function () {
       const { wETH, eETH } = await setupFixture();
 
-      expect(await eETH.name()).to.equal("ERC7984 Wrapped ETH");
+      expect(await eETH.name()).to.equal("FHERC20 Wrapped ETH");
       expect(await eETH.symbol()).to.equal("eETH");
       expect(await eETH.decimals()).to.equal(6);
       expect(await eETH.contractURI()).to.equal("https://example.com/eeth.json");
@@ -77,7 +77,7 @@ describe("ERC7984NativeWrapper", function () {
     });
   });
 
-  describe("shieldWrappedNative (WETH → ERC7984)", function () {
+  describe("shieldWrappedNative (WETH → FHERC20)", function () {
     it("should shield WETH successfully", async function () {
       const { eETH, bob, wETH } = await setupFixture();
 
@@ -88,11 +88,11 @@ describe("ERC7984NativeWrapper", function () {
       await wETH.connect(bob).deposit({ value: mintValue });
       await wETH.connect(bob).approve(eETH.target, mintValue);
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await expect(eETH.connect(bob).shieldWrappedNative(bob, shieldValue)).to.emit(eETH, "ShieldedNative");
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
       await hre.cofhe.mocks.expectPlaintext(await eETH.confidentialTotalSupply(), confidentialValue);
     });
 
@@ -105,11 +105,11 @@ describe("ERC7984NativeWrapper", function () {
       await wETH.connect(bob).deposit({ value: shieldValue });
       await wETH.connect(bob).approve(eETH.target, shieldValue);
 
-      await prepExpectERC7984BalancesChange(eETH, alice.address);
+      await prepExpectFHERC20BalancesChange(eETH, alice.address);
 
       await eETH.connect(bob).shieldWrappedNative(alice, shieldValue);
 
-      await expectERC7984BalancesChange(eETH, alice.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, alice.address, confidentialValue);
     });
 
     it("should truncate amount to rate multiple", async function () {
@@ -122,11 +122,11 @@ describe("ERC7984NativeWrapper", function () {
       await wETH.connect(bob).deposit({ value: shieldValue });
       await wETH.connect(bob).approve(eETH.target, shieldValue);
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await eETH.connect(bob).shieldWrappedNative(bob, shieldValue);
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
     });
 
     it("should revert when amount too small for confidential precision", async function () {
@@ -151,26 +151,26 @@ describe("ERC7984NativeWrapper", function () {
       await wETH.connect(bob).deposit({ value: shieldValue });
       await wETH.connect(bob).approve(eETH.target, shieldValue);
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await eETH.connect(bob).shieldWrappedNative(ZeroAddress, shieldValue);
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
     });
   });
 
-  describe("shieldNative (ETH → ERC7984)", function () {
+  describe("shieldNative (ETH → FHERC20)", function () {
     it("should shield native ETH successfully", async function () {
       const { eETH, bob } = await setupFixture();
 
       const shieldValue = ethers.parseEther("1");
       const confidentialValue = shieldValue / conversionRate;
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await expect(eETH.connect(bob).shieldNative(bob, { value: shieldValue })).to.emit(eETH, "ShieldedNative");
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
       await hre.cofhe.mocks.expectPlaintext(await eETH.confidentialTotalSupply(), confidentialValue);
     });
 
@@ -182,11 +182,11 @@ describe("ERC7984NativeWrapper", function () {
       const totalSent = alignedValue + dust;
       const confidentialValue = alignedValue / conversionRate;
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await eETH.connect(bob).shieldNative(bob, { value: totalSent });
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
     });
 
     it("should revert when amount too small for confidential precision", async function () {
@@ -206,15 +206,15 @@ describe("ERC7984NativeWrapper", function () {
       const shieldValue = ethers.parseEther("1");
       const confidentialValue = shieldValue / conversionRate;
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       await eETH.connect(bob).shieldNative(ZeroAddress, { value: shieldValue });
 
-      await expectERC7984BalancesChange(eETH, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, confidentialValue);
     });
   });
 
-  describe("unshield & claimUnshielded (ERC7984 → ETH)", function () {
+  describe("unshield & claimUnshielded (FHERC20 → ETH)", function () {
     async function setupShieldedFixture() {
       const fixture = await setupFixture();
       const { eETH, bob } = fixture;
@@ -231,12 +231,12 @@ describe("ERC7984NativeWrapper", function () {
       const unshieldConfidentialValue = 1_000_000n;
       const unshieldNativeValue = unshieldConfidentialValue * conversionRate; // 1e18
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       const tx = await eETH.connect(bob).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eETH, "Unshielded");
-      await expectERC7984BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eETH);
 
@@ -282,12 +282,12 @@ describe("ERC7984NativeWrapper", function () {
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await eETH.connect(bob).setOperator(alice.address, timestamp);
 
-      await prepExpectERC7984BalancesChange(eETH, bob.address);
+      await prepExpectFHERC20BalancesChange(eETH, bob.address);
 
       const tx = await eETH.connect(alice).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eETH, "Unshielded");
-      await expectERC7984BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
+      await expectFHERC20BalancesChange(eETH, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eETH);
 
@@ -356,7 +356,7 @@ describe("ERC7984NativeWrapper", function () {
 
       await expect(eETH.connect(bob).unshield(bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
         eETH,
-        "ERC7984InvalidReceiver",
+        "FHERC20InvalidReceiver",
       );
     });
 
@@ -367,7 +367,7 @@ describe("ERC7984NativeWrapper", function () {
 
       await expect(eETH.connect(alice).unshield(bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
         eETH,
-        "ERC7984UnauthorizedSpender",
+        "FHERC20UnauthorizedSpender",
       );
     });
   });

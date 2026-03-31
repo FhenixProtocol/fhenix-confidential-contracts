@@ -2,15 +2,22 @@
 pragma solidity ^0.8.25;
 
 import { FHE, euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
-import { ERC7984 } from "../ERC7984/ERC7984.sol";
+import { FHERC20Upgradeable } from "../FHERC20/FHERC20Upgradeable.sol";
 
-contract ERC7984_Harness is ERC7984 {
-    constructor(
+contract FHERC20Upgradeable_Harness is FHERC20Upgradeable {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         string memory name_,
         string memory symbol_,
         uint8 decimals_,
         string memory contractURI_
-    ) ERC7984(name_, symbol_, decimals_, contractURI_) {}
+    ) public initializer {
+        __FHERC20_init(name_, symbol_, decimals_, contractURI_);
+    }
 
     function mint(address account, uint64 value) public {
         _mint(account, FHE.asEuint64(value));

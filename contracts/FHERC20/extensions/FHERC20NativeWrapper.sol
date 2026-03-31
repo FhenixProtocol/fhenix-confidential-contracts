@@ -6,14 +6,14 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { IERC7984NativeWrapper } from "../../interfaces/IERC7984NativeWrapper.sol";
+import { IFHERC20NativeWrapper } from "../../interfaces/IFHERC20NativeWrapper.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
-import { ERC7984 } from "../ERC7984.sol";
-import { ERC7984WrapperClaimHelper } from "../utils/ERC7984WrapperClaimHelper.sol";
+import { FHERC20 } from "../FHERC20.sol";
+import { FHERC20WrapperClaimHelper } from "../utils/FHERC20WrapperClaimHelper.sol";
 
 /**
- * @dev A wrapper contract built on top of {ERC7984} that shields a chain's native token
- * (e.g. ETH) into a confidential {ERC7984} token.
+ * @dev A wrapper contract built on top of {FHERC20} that shields a chain's native token
+ * (e.g. ETH) into a confidential {FHERC20} token.
  *
  * Two shield entry-points are provided:
  *  - {shieldWrappedNative}: pulls WETH from the caller, unwraps it to native, and mints
@@ -24,14 +24,14 @@ import { ERC7984WrapperClaimHelper } from "../utils/ERC7984WrapperClaimHelper.so
  * Confidential precision is capped at {_maxDecimals} (default 6). For 18-decimal native
  * tokens the conversion rate is 1e12, so 1 native unit = 1e-6 confidential units.
  */
-abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC7984WrapperClaimHelper {
+abstract contract FHERC20NativeWrapper is FHERC20, IFHERC20NativeWrapper, FHERC20WrapperClaimHelper {
     using SafeERC20 for IWETH;
 
     IWETH private immutable _weth;
     uint8 private immutable _wrappedDecimals;
     uint256 private immutable _rate;
 
-    error ERC7984TotalSupplyOverflow();
+    error FHERC20TotalSupplyOverflow();
     error NativeTransferFailed();
     error AmountTooSmallForConfidentialPrecision();
 
@@ -51,7 +51,7 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
 
     receive() external payable {}
 
-    /// @inheritdoc IERC7984NativeWrapper
+    /// @inheritdoc IFHERC20NativeWrapper
     function shieldWrappedNative(address to, uint256 value) public virtual returns (euint64) {
         if (to == address(0)) to = msg.sender;
 
@@ -70,7 +70,7 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
         return shieldedAmountSent;
     }
 
-    /// @inheritdoc IERC7984NativeWrapper
+    /// @inheritdoc IFHERC20NativeWrapper
     function shieldNative(address to) public payable virtual returns (euint64) {
         if (to == address(0)) to = msg.sender;
 
@@ -99,8 +99,8 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
      * Returns the encrypted amount that was burned (used as the claim's cipher-text handle).
      */
     function unshield(address from, address to, uint64 amount) public virtual returns (euint64) {
-        if (to == address(0)) revert ERC7984InvalidReceiver(to);
-        if (from != msg.sender && !isOperator(from, msg.sender)) revert ERC7984UnauthorizedSpender(from, msg.sender);
+        if (to == address(0)) revert FHERC20InvalidReceiver(to);
+        if (from != msg.sender && !isOperator(from, msg.sender)) revert FHERC20UnauthorizedSpender(from, msg.sender);
 
         euint64 unshieldAmount_ = _burn(from, FHE.asEuint64(amount));
         FHE.allowPublic(unshieldAmount_);
@@ -147,17 +147,17 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
         }
     }
 
-    /// @inheritdoc ERC7984
+    /// @inheritdoc FHERC20
     function decimals() public view virtual override returns (uint8) {
         return _wrappedDecimals;
     }
 
-    /// @inheritdoc IERC7984NativeWrapper
+    /// @inheritdoc IFHERC20NativeWrapper
     function rate() public view virtual returns (uint256) {
         return _rate;
     }
 
-    /// @inheritdoc IERC7984NativeWrapper
+    /// @inheritdoc IFHERC20NativeWrapper
     function weth() public view virtual returns (address) {
         return address(_weth);
     }
@@ -165,7 +165,7 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return
-            interfaceId == type(IERC7984NativeWrapper).interfaceId ||
+            interfaceId == type(IFHERC20NativeWrapper).interfaceId ||
             super.supportsInterface(interfaceId);
     }
 
@@ -194,11 +194,11 @@ abstract contract ERC7984NativeWrapper is ERC7984, IERC7984NativeWrapper, ERC798
      */
     function _checkConfidentialTotalSupply() internal virtual {
         if (inferredTotalSupply() > maxTotalSupply()) {
-            revert ERC7984TotalSupplyOverflow();
+            revert FHERC20TotalSupplyOverflow();
         }
     }
 
-    /// @inheritdoc ERC7984
+    /// @inheritdoc FHERC20
     function _update(address from, address to, euint64 amount) internal virtual override returns (euint64) {
         if (from == address(0)) {
             _checkConfidentialTotalSupply();

@@ -1,17 +1,17 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
-import { ERC7984ERC20Wrapper_Harness, ERC20_Harness } from "../typechain-types";
+import { FHERC20ERC20Wrapper_Harness, ERC20_Harness } from "../typechain-types";
 import {
   expectERC20BalancesChange,
-  expectERC7984BalancesChange,
+  expectFHERC20BalancesChange,
   prepExpectERC20BalancesChange,
-  prepExpectERC7984BalancesChange,
+  prepExpectFHERC20BalancesChange,
 } from "./utils";
 import { ZeroAddress, ContractTransactionResponse } from "ethers";
 
 async function getUnshieldRequestId(
   tx: ContractTransactionResponse,
-  contract: ERC7984ERC20Wrapper_Harness,
+  contract: FHERC20ERC20Wrapper_Harness,
 ): Promise<string> {
   const receipt = await tx.wait();
   for (const log of receipt!.logs) {
@@ -25,19 +25,19 @@ async function getUnshieldRequestId(
   throw new Error("Unshielded event not found");
 }
 
-describe("ERC7984ERC20Wrapper", function () {
+describe("FHERC20ERC20Wrapper", function () {
   const deployContracts = async () => {
     const wBTCFactory = await ethers.getContractFactory("ERC20_Harness");
     const wBTC = (await wBTCFactory.deploy("Wrapped BTC", "wBTC", 8)) as ERC20_Harness;
     await wBTC.waitForDeployment();
 
-    const eBTCFactory = await ethers.getContractFactory("ERC7984ERC20Wrapper_Harness");
+    const eBTCFactory = await ethers.getContractFactory("FHERC20ERC20Wrapper_Harness");
     const eBTC = (await eBTCFactory.deploy(
       wBTC.target,
-      "ERC7984 Wrapped BTC",
+      "FHERC20 Wrapped BTC",
       "eBTC",
       "https://example.com/ebtc.json",
-    )) as ERC7984ERC20Wrapper_Harness;
+    )) as FHERC20ERC20Wrapper_Harness;
     await eBTC.waitForDeployment();
 
     return { wBTC, eBTC };
@@ -62,7 +62,7 @@ describe("ERC7984ERC20Wrapper", function () {
     it("should be constructed correctly", async function () {
       const { wBTC, eBTC } = await setupFixture();
 
-      expect(await eBTC.name()).to.equal("ERC7984 Wrapped BTC");
+      expect(await eBTC.name()).to.equal("FHERC20 Wrapped BTC");
       expect(await eBTC.symbol()).to.equal("eBTC");
       expect(await eBTC.decimals()).to.equal(6);
       expect(await eBTC.contractURI()).to.equal("https://example.com/ebtc.json");
@@ -84,7 +84,7 @@ describe("ERC7984ERC20Wrapper", function () {
     });
   });
 
-  describe("shield (ERC20 → ERC7984)", function () {
+  describe("shield (ERC20 → FHERC20)", function () {
     it("should shield tokens successfully", async function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
@@ -96,12 +96,12 @@ describe("ERC7984ERC20Wrapper", function () {
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
 
       await prepExpectERC20BalancesChange(wBTC, bob.address);
-      await prepExpectERC7984BalancesChange(eBTC, bob.address);
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
       await expect(eBTC.connect(bob).shield(bob, shieldValue)).to.emit(eBTC, "ConfidentialTransfer");
 
       await expectERC20BalancesChange(wBTC, bob.address, -1n * shieldValue);
-      await expectERC7984BalancesChange(eBTC, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eBTC, bob.address, confidentialValue);
 
       await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), confidentialValue);
       expect(await eBTC.inferredTotalSupply()).to.equal(confidentialValue);
@@ -116,11 +116,11 @@ describe("ERC7984ERC20Wrapper", function () {
       await wBTC.mint(bob, shieldValue);
       await wBTC.connect(bob).approve(eBTC.target, shieldValue);
 
-      await prepExpectERC7984BalancesChange(eBTC, alice.address);
+      await prepExpectFHERC20BalancesChange(eBTC, alice.address);
 
       await eBTC.connect(bob).shield(alice, shieldValue);
 
-      await expectERC7984BalancesChange(eBTC, alice.address, confidentialValue);
+      await expectFHERC20BalancesChange(eBTC, alice.address, confidentialValue);
     });
 
     it("should truncate amount to nearest rate multiple", async function () {
@@ -134,13 +134,13 @@ describe("ERC7984ERC20Wrapper", function () {
       await wBTC.connect(bob).approve(eBTC.target, shieldValue);
 
       await prepExpectERC20BalancesChange(wBTC, bob.address);
-      await prepExpectERC7984BalancesChange(eBTC, bob.address);
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
       await eBTC.connect(bob).shield(bob, shieldValue);
 
       // Only the aligned portion is transferred
       await expectERC20BalancesChange(wBTC, bob.address, -1n * alignedValue);
-      await expectERC7984BalancesChange(eBTC, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eBTC, bob.address, confidentialValue);
     });
 
     it("should shield cumulatively", async function () {
@@ -154,16 +154,16 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await eBTC.connect(bob).shield(bob, shieldValue);
 
-      await prepExpectERC7984BalancesChange(eBTC, bob.address);
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
       await eBTC.connect(bob).shield(bob, shieldValue);
 
-      await expectERC7984BalancesChange(eBTC, bob.address, confidentialValue);
+      await expectFHERC20BalancesChange(eBTC, bob.address, confidentialValue);
       await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), confidentialValue * 2n);
     });
   });
 
-  describe("unshield & claimUnshielded (ERC7984 → ERC20)", function () {
+  describe("unshield & claimUnshielded (FHERC20 → ERC20)", function () {
     async function setupShieldedFixture() {
       const fixture = await setupFixture();
       const { eBTC, bob, wBTC } = fixture;
@@ -182,12 +182,12 @@ describe("ERC7984ERC20Wrapper", function () {
       const unshieldConfidentialValue = 1_000_000n;
       const unshieldERC20Value = unshieldConfidentialValue * conversionRate; // 1e8
 
-      await prepExpectERC7984BalancesChange(eBTC, bob.address);
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
       const tx = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
-      await expectERC7984BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
+      await expectFHERC20BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eBTC);
 
@@ -232,12 +232,12 @@ describe("ERC7984ERC20Wrapper", function () {
       const timestamp = (await ethers.provider.getBlock("latest"))!.timestamp + 100;
       await eBTC.connect(bob).setOperator(alice.address, timestamp);
 
-      await prepExpectERC7984BalancesChange(eBTC, bob.address);
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
       const tx = await eBTC.connect(alice).unshield(bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
-      await expectERC7984BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
+      await expectFHERC20BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
 
       const unshieldRequestId = await getUnshieldRequestId(tx, eBTC);
 
@@ -307,7 +307,7 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await expect(eBTC.connect(bob).unshield(bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
         eBTC,
-        "ERC7984InvalidReceiver",
+        "FHERC20InvalidReceiver",
       );
     });
 
@@ -321,7 +321,7 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await expect(eBTC.connect(alice).unshield(bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
         eBTC,
-        "ERC7984UnauthorizedSpender",
+        "FHERC20UnauthorizedSpender",
       );
     });
   });
@@ -368,7 +368,7 @@ describe("ERC7984ERC20Wrapper", function () {
 
       await expect(
         eBTC.connect(bob).onTransferReceived(bob.address, bob.address, 1000n, "0x"),
-      ).to.be.revertedWithCustomError(eBTC, "ERC7984UnauthorizedCaller");
+      ).to.be.revertedWithCustomError(eBTC, "FHERC20UnauthorizedCaller");
     });
   });
 });
