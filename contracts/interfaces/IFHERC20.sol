@@ -13,9 +13,6 @@ import { IERC7984 } from "./IERC7984.sol";
  * balances, and the mutative functions ({transfer}, {transferFrom}, {approve}) revert.
  */
 interface IFHERC20 is IERC7984, IERC20 {
-    /// @dev Returns the confidential balance of the account `account`.
-    function confidentialBalanceOf(address account) external view returns (euint64);
-
     /// @dev Returns `true`, signalling that {balanceOf} returns an indicator, not a real balance.
     function balanceOfIsIndicator() external view returns (bool);
 
