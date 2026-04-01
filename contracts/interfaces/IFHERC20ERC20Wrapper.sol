@@ -4,15 +4,15 @@ pragma solidity ^0.8.25;
 import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 /**
- * @dev Interface for an {ERC7984} wrapper that shields an underlying ERC-20 token into a
- * confidential {ERC7984} token. Users `shield` their ERC-20 tokens to receive confidential
+ * @dev Interface for an {FHERC20} wrapper that shields an underlying ERC-20 token into a
+ * confidential {FHERC20} token. Users `shield` their ERC-20 tokens to receive confidential
  * tokens, and `unshield` to burn them and reclaim the underlying.
  *
  * The unshield flow is asynchronous: `unshield` burns the confidential tokens and creates a
  * decrypt request, then `claimUnshielded` verifies the decryption proof and transfers
  * the underlying tokens.
  */
-interface IERC7984ERC20Wrapper {
+interface IFHERC20ERC20Wrapper {
     /// @dev Emitted when an unshield request is created.
     event Unshielded(address indexed to, euint64 indexed amount);
 
