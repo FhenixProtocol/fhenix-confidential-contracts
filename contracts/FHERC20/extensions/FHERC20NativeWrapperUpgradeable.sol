@@ -9,6 +9,7 @@ import { IFHERC20NativeWrapper } from "../../interfaces/IFHERC20NativeWrapper.so
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { FHERC20Upgradeable } from "../FHERC20Upgradeable.sol";
 import { FHERC20WrapperClaimHelperUpgradeable } from "../utils/FHERC20WrapperClaimHelperUpgradeable.sol";
+import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender } from "../utils/FHERC20Errors.sol";
 
 /**
  * @dev Upgradeable wrapper that shields a chain's native token (e.g. ETH) into a confidential {FHERC20} token.

@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 import { FHE, ebool, euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 import { IERC7984Receiver } from "../../interfaces/IERC7984Receiver.sol";
-import { FHERC20 } from "../FHERC20.sol";
+import { FHERC20InvalidReceiver } from "./FHERC20Errors.sol";
 
 /// @dev Library that provides common {FHERC20} utility functions.
 library FHERC20Utils {
@@ -32,7 +32,7 @@ library FHERC20Utils {
                 return retval;
             } catch (bytes memory reason) {
                 if (reason.length == 0) {
-                    revert FHERC20.FHERC20InvalidReceiver(to);
+                    revert FHERC20InvalidReceiver(to);
                 } else {
                     assembly ("memory-safe") {
                         revert(add(32, reason), mload(reason))
