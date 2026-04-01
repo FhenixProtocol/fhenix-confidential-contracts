@@ -10,6 +10,7 @@ import { IFHERC20NativeWrapper } from "../../interfaces/IFHERC20NativeWrapper.so
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { FHERC20 } from "../FHERC20.sol";
 import { FHERC20WrapperClaimHelper } from "../utils/FHERC20WrapperClaimHelper.sol";
+import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender } from "../utils/FHERC20Errors.sol";
 
 /**
  * @dev A wrapper contract built on top of {FHERC20} that shields a chain's native token

@@ -10,6 +10,15 @@ import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import { IFHERC20, IERC7984 } from "../interfaces/IFHERC20.sol";
 import { FHESafeMath } from "../utils/FHESafeMath.sol";
 import { FHERC20Utils } from "./utils/FHERC20Utils.sol";
+import {
+    FHERC20InvalidReceiver,
+    FHERC20InvalidSender,
+    FHERC20UnauthorizedSpender,
+    FHERC20ZeroBalance,
+    FHERC20UnauthorizedUseOfEncryptedAmount,
+    FHERC20UnauthorizedCaller,
+    FHERC20IncompatibleFunction
+} from "./utils/FHERC20Errors.sol";
 
 /**
  * @dev Reference implementation for {IFHERC20}.
@@ -52,31 +61,6 @@ abstract contract FHERC20 is IFHERC20, Context, ERC165 {
 
     /// @dev Emitted when an encrypted amount `encryptedAmount` is requested for disclosure by `requester`.
     event AmountDiscloseRequested(euint64 indexed encryptedAmount, address indexed requester);
-
-    /// @dev The given receiver `receiver` is invalid for transfers.
-    error FHERC20InvalidReceiver(address receiver);
-
-    /// @dev The given sender `sender` is invalid for transfers.
-    error FHERC20InvalidSender(address sender);
-
-    /// @dev The given holder `holder` is not authorized to spend on behalf of `spender`.
-    error FHERC20UnauthorizedSpender(address holder, address spender);
-
-    /// @dev The holder `holder` is trying to send tokens but has a balance of 0.
-    error FHERC20ZeroBalance(address holder);
-
-    /**
-     * @dev The caller `user` does not have access to the encrypted amount `amount`.
-     *
-     * NOTE: Try using the equivalent transfer function with an input proof.
-     */
-    error FHERC20UnauthorizedUseOfEncryptedAmount(euint64 amount, address user);
-
-    /// @dev The given caller `caller` is not authorized for the current operation.
-    error FHERC20UnauthorizedCaller(address caller);
-
-    /// @dev Reverts when a cleartext ERC-20 function is called on a confidential token.
-    error FHERC20IncompatibleFunction();
 
     constructor(string memory name_, string memory symbol_, uint8 decimals_, string memory contractURI_) {
         _name = name_;

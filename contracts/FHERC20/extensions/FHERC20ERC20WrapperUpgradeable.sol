@@ -11,6 +11,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { IFHERC20ERC20Wrapper } from "../../interfaces/IFHERC20ERC20Wrapper.sol";
 import { FHERC20Upgradeable } from "../FHERC20Upgradeable.sol";
 import { FHERC20WrapperClaimHelperUpgradeable } from "../utils/FHERC20WrapperClaimHelperUpgradeable.sol";
+import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender, FHERC20UnauthorizedCaller } from "../utils/FHERC20Errors.sol";
 
 /**
  * @dev Upgradeable wrapper that shields a standard ERC-20 token into a confidential {FHERC20} token.
