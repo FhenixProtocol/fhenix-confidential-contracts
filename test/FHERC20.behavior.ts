@@ -70,7 +70,7 @@ export function getIERC7984InterfaceId(): string {
 }
 
 export function getIFHERC20InterfaceId(): string {
-  return computeInterfaceId(["confidentialBalanceOf(address)", "balanceOfIsIndicator()", "indicatorTick()"]);
+  return computeInterfaceId(["balanceOfIsIndicator()", "indicatorTick()"]);
 }
 
 // =========================================================================
