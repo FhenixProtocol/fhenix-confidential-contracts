@@ -184,7 +184,7 @@ describe("FHERC20ERC20Wrapper", function () {
 
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      const tx = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldConfidentialValue);
+      const tx = await eBTC.connect(bob)["unshield(address,address,uint64)"](bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
       await expectFHERC20BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
@@ -234,7 +234,7 @@ describe("FHERC20ERC20Wrapper", function () {
 
       await prepExpectFHERC20BalancesChange(eBTC, bob.address);
 
-      const tx = await eBTC.connect(alice).unshield(bob.address, alice.address, unshieldConfidentialValue);
+      const tx = await eBTC.connect(alice)["unshield(address,address,uint64)"](bob.address, alice.address, unshieldConfidentialValue);
 
       await expect(tx).to.emit(eBTC, "Unshielded");
       await expectFHERC20BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
@@ -260,11 +260,11 @@ describe("FHERC20ERC20Wrapper", function () {
       const unshieldAmount2 = 300_000n;
 
       // Create first unshield
-      const tx1 = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldAmount1);
+      const tx1 = await eBTC.connect(bob)["unshield(address,address,uint64)"](bob.address, alice.address, unshieldAmount1);
       const requestId1 = await getUnshieldRequestId(tx1, eBTC);
 
       // Create second unshield
-      const tx2 = await eBTC.connect(bob).unshield(bob.address, alice.address, unshieldAmount2);
+      const tx2 = await eBTC.connect(bob)["unshield(address,address,uint64)"](bob.address, alice.address, unshieldAmount2);
       const requestId2 = await getUnshieldRequestId(tx2, eBTC);
 
       // Alice should have 2 pending claims
@@ -294,6 +294,64 @@ describe("FHERC20ERC20Wrapper", function () {
       const claimsAfter = await eBTC.getUserClaims(alice.address);
       expect(claimsAfter.length).to.equal(0);
     });
+
+    it("should complete unshield and claim flow with encrypted amount (euint64)", async function () {
+      const { eBTC, bob, alice, wBTC, bobClient } = await setupFixture();
+
+      const unshieldConfidentialValue = 1_000_000n;
+      const unshieldERC20Value = unshieldConfidentialValue * conversionRate; // 1e8
+
+      // Shield exactly the unshield amount so balance handle matches the desired value
+      await wBTC.mint(bob, unshieldERC20Value);
+      await wBTC.connect(bob).approve(eBTC.target, unshieldERC20Value);
+      await eBTC.connect(bob).shield(bob, unshieldERC20Value);
+
+      // Get bob's encrypted balance handle as the euint64 input
+      const encryptedAmount = await eBTC.confidentialBalanceOf(bob.address);
+
+      await prepExpectFHERC20BalancesChange(eBTC, bob.address);
+
+      const tx = await eBTC
+        .connect(bob)
+        ["unshield(address,address,bytes32)"](bob.address, alice.address, encryptedAmount);
+
+      await expect(tx).to.emit(eBTC, "Unshielded");
+      await expectFHERC20BalancesChange(eBTC, bob.address, -1n * unshieldConfidentialValue);
+
+      const unshieldRequestId = await getUnshieldRequestId(tx, eBTC);
+
+      // Verify claim was created via getClaim
+      const pendingClaim = await eBTC.getClaim(unshieldRequestId);
+      expect(pendingClaim.to).to.equal(alice.address);
+      expect(pendingClaim.requestedAmount).to.equal(0n);
+      expect(pendingClaim.claimed).to.equal(false);
+
+      // Verify getUserClaims tracks the pending claim
+      const aliceClaims = await eBTC.getUserClaims(alice.address);
+      expect(aliceClaims.length).to.equal(1);
+      expect(aliceClaims[0].ctHash).to.equal(unshieldRequestId);
+
+      // Time travel past decryption delay
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await bobClient.decryptForTx(unshieldRequestId).withoutPermit().execute();
+
+      await prepExpectERC20BalancesChange(wBTC, alice.address);
+
+      await expect(
+        eBTC.connect(bob).claimUnshielded(unshieldRequestId, decryption.decryptedValue, decryption.signature),
+      ).to.emit(eBTC, "ClaimedUnshielded");
+
+      await expectERC20BalancesChange(wBTC, alice.address, unshieldERC20Value);
+
+      // Claim is marked as claimed and removed from user's pending claims
+      const claimedClaim = await eBTC.getClaim(unshieldRequestId);
+      expect(claimedClaim.claimed).to.equal(true);
+
+      const aliceClaimsAfter = await eBTC.getUserClaims(alice.address);
+      expect(aliceClaimsAfter.length).to.equal(0);
+    });
   });
 
   describe("unshield reverts", function () {
@@ -305,7 +363,7 @@ describe("FHERC20ERC20Wrapper", function () {
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
       await eBTC.connect(bob).shield(bob, mintValue);
 
-      await expect(eBTC.connect(bob).unshield(bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
+      await expect(eBTC.connect(bob)["unshield(address,address,uint64)"](bob.address, ZeroAddress, 1_000_000n)).to.be.revertedWithCustomError(
         eBTC,
         "FHERC20InvalidReceiver",
       );
@@ -319,7 +377,7 @@ describe("FHERC20ERC20Wrapper", function () {
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
       await eBTC.connect(bob).shield(bob, mintValue);
 
-      await expect(eBTC.connect(alice).unshield(bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
+      await expect(eBTC.connect(alice)["unshield(address,address,uint64)"](bob.address, alice.address, 1_000_000n)).to.be.revertedWithCustomError(
         eBTC,
         "FHERC20UnauthorizedSpender",
       );
@@ -344,7 +402,7 @@ describe("FHERC20ERC20Wrapper", function () {
       await wBTC.connect(bob).approve(eBTC.target, mintValue);
       await eBTC.connect(bob).shield(bob, mintValue);
 
-      const tx = await eBTC.connect(bob).unshield(bob.address, alice.address, 1_000_000n);
+      const tx = await eBTC.connect(bob)["unshield(address,address,uint64)"](bob.address, alice.address, 1_000_000n);
       const requestId = await getUnshieldRequestId(tx, eBTC);
 
       await hre.network.provider.send("evm_increaseTime", [11]);

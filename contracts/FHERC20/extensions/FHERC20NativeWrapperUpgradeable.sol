@@ -9,7 +9,7 @@ import { IFHERC20NativeWrapper } from "../../interfaces/IFHERC20NativeWrapper.so
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { FHERC20Upgradeable } from "../FHERC20Upgradeable.sol";
 import { FHERC20WrapperClaimHelperUpgradeable } from "../utils/FHERC20WrapperClaimHelperUpgradeable.sol";
-import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender } from "../utils/FHERC20Errors.sol";
+import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender, FHERC20UnauthorizedUseOfEncryptedAmount } from "../utils/FHERC20Errors.sol";
 
 /**
  * @dev Upgradeable wrapper that shields a chain's native token (e.g. ETH) into a confidential {FHERC20} token.
@@ -109,17 +109,26 @@ abstract contract FHERC20NativeWrapperUpgradeable is
         return shieldedAmountSent;
     }
 
+    /**
+     * @dev Initiates an unshield of `amount` confidential tokens from `from`, creating a pending
+     * claim for `to`. The caller must be `from` or an operator for `from`.
+     *
+     * Returns the encrypted amount that was burned (used as the claim's cipher-text handle).
+     */
     function unshield(address from, address to, uint64 amount) public virtual returns (euint64) {
-        if (to == address(0)) revert FHERC20InvalidReceiver(to);
-        if (from != msg.sender && !isOperator(from, msg.sender)) revert FHERC20UnauthorizedSpender(from, msg.sender);
+        return _unshield(from, to, FHE.asEuint64(amount), amount);
+    }
 
-        euint64 unshieldAmount_ = _burn(from, FHE.asEuint64(amount));
-        FHE.allowPublic(unshieldAmount_);
-
-        _createClaim(to, amount, unshieldAmount_);
-
-        emit Unshielded(to, unshieldAmount_);
-        return unshieldAmount_;
+    /**
+     * @dev Initiates an unshield of an encrypted `amount` from `from`, creating a pending
+     * unshield request for `to`. The caller must have ACL access to `amount` and must be
+     * `from` or an operator for `from`.
+     *
+     * Returns the encrypted amount that was burned.
+     */
+    function unshield(address from, address to, euint64 amount) public virtual returns (euint64) {
+        if (!FHE.isAllowed(amount, msg.sender)) revert FHERC20UnauthorizedUseOfEncryptedAmount(amount, msg.sender);
+        return _unshield(from, to, amount, 0);
     }
 
     function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes memory decryptionProof) public virtual {
@@ -187,6 +196,20 @@ abstract contract FHERC20NativeWrapperUpgradeable is
             _checkConfidentialTotalSupply();
         }
         return super._update(from, to, amount);
+    }
+
+    /// @dev Shared internal logic for both unshield overloads.
+    function _unshield(address from, address to, euint64 amount, uint64 requestedAmount) internal virtual returns (euint64) {
+        if (to == address(0)) revert FHERC20InvalidReceiver(to);
+        if (from != msg.sender && !isOperator(from, msg.sender)) revert FHERC20UnauthorizedSpender(from, msg.sender);
+
+        euint64 unshieldAmount_ = _burn(from, amount);
+        FHE.allowPublic(unshieldAmount_);
+
+        _createClaim(to, requestedAmount, unshieldAmount_);
+
+        emit Unshielded(to, unshieldAmount_);
+        return unshieldAmount_;
     }
 
     function _maxDecimals() internal pure virtual returns (uint8) {

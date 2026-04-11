@@ -41,6 +41,15 @@ interface IFHERC20ERC20Wrapper {
     function unshield(address from, address to, uint64 amount) external returns (euint64);
 
     /**
+     * @dev Initiates an unshield of an encrypted `amount` from `from`, creating a pending
+     * unshield request for `to`. The caller must have ACL access to `amount` and must be
+     * `from` or an operator for `from`.
+     *
+     * Returns the encrypted amount that was burned.
+     */
+    function unshield(address from, address to, euint64 amount) external returns (euint64);
+
+    /**
      * @dev Claims a pending unshield request by verifying the decryption proof and transferring
      * `unshieldAmountCleartext * rate()` underlying tokens to the requester.
      */
