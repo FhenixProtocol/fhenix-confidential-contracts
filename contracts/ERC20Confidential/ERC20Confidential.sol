@@ -82,13 +82,14 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20Wrapper
     }
 
     function unshield(uint64 amount) public virtual returns (euint64) {
-        euint64 burned = _confidentialUpdate(msg.sender, address(0), FHE.asEuint64(amount));
+        return _unshield(FHE.asEuint64(amount), amount);
+    }
 
-        FHE.allowPublic(burned);
-        _createClaim(msg.sender, amount, burned);
-
-        emit TokensUnshielded(msg.sender, burned);
-        return burned;
+    function unshield(euint64 amount) public virtual returns (euint64) {
+        if (!FHE.isAllowed(amount, msg.sender)) {
+            revert ERC20ConfidentialUnauthorizedUseOfEncryptedAmount(amount, msg.sender);
+        }
+        return _unshield(amount, 0);
     }
 
     function claimUnshielded(bytes32 ctHash, uint64 decryptedAmount, bytes calldata decryptionProof) public virtual {
@@ -176,6 +177,13 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20Wrapper
         if (from == address(0)) revert ERC20InvalidSender(address(0));
         if (to == address(0)) revert ERC20InvalidReceiver(address(0));
         transferred = _confidentialUpdate(from, to, value);
+    }
+
+    function _unshield(euint64 amount, uint64 requestedAmount) internal virtual returns (euint64 burned) {
+        burned = _confidentialUpdate(msg.sender, address(0), amount);
+        FHE.allowPublic(burned);
+        _createClaim(msg.sender, requestedAmount, burned);
+        emit TokensUnshielded(msg.sender, burned);
     }
 
     function _confidentialUpdate(

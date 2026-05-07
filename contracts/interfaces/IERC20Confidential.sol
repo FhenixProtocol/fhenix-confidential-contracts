@@ -94,6 +94,14 @@ interface IERC20Confidential {
     function unshield(uint64 amount) external returns (euint64);
 
     /**
+     * @dev Initiates an unshield of an encrypted `amount` of confidential tokens, creating a
+     * pending claim. The caller must have ACL access to `amount`.
+     *
+     * Returns the encrypted amount that was burned.
+     */
+    function unshield(euint64 amount) external returns (euint64);
+
+    /**
      * @dev Claims a pending unshield request by verifying the decryption proof and transferring
      * the corresponding public tokens.
      */

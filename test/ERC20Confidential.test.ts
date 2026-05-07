@@ -116,7 +116,7 @@ describe("ERC20Confidential", function () {
       const unshieldAmountConfidential = BigInt(50 * 1e6);
       const unshieldAmountPublic = ethers.parseEther("50");
 
-      const tx = await token.connect(bob).unshield(unshieldAmountConfidential);
+      const tx = await token.connect(bob)["unshield(uint64)"](unshieldAmountConfidential);
       await expect(tx).to.emit(token, "TokensUnshielded");
 
       const unshieldRequestId = await getUnshieldRequestId(tx, token);
@@ -139,16 +139,72 @@ describe("ERC20Confidential", function () {
       expect(await token.balanceOf(bob.address)).to.equal(unshieldAmountPublic);
     });
 
+    it("Should unshield using an encrypted (euint64) amount", async function () {
+      const { token, bob, bobClient } = await setupFixture();
+
+      const initialAmount = ethers.parseEther("100");
+      await token.mint(bob.address, initialAmount);
+      await token.connect(bob).shield(initialAmount);
+
+      // Use bob's full encrypted balance handle as the euint64 input.
+      // Bob has ACL access to it because _confidentialUpdate calls FHE.allow(ptr, from).
+      const encryptedAmount = await token.confidentialBalanceOf(bob.address);
+
+      const tx = await token.connect(bob)["unshield(bytes32)"](encryptedAmount);
+      await expect(tx).to.emit(token, "TokensUnshielded");
+
+      const unshieldRequestId = await getUnshieldRequestId(tx, token);
+
+      // Claim is recorded with requestedAmount = 0 (cleartext unknown until decryption proof).
+      const pendingClaim = await token.getClaim(unshieldRequestId);
+      expect(pendingClaim.to).to.equal(bob.address);
+      expect(pendingClaim.requestedAmount).to.equal(0n);
+      expect(pendingClaim.claimed).to.equal(false);
+
+      // Confidential balance is now zero.
+      const balanceHandle = await token.confidentialBalanceOf(bob.address);
+      await hre.cofhe.mocks.expectPlaintext(balanceHandle, 0n);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await bobClient.decryptForTx(unshieldRequestId).withoutPermit().execute();
+
+      await expect(
+        token.connect(bob).claimUnshielded(unshieldRequestId, decryption.decryptedValue, decryption.signature),
+      ).to.emit(token, "UnshieldedTokensClaimed");
+
+      // Full original public amount is returned.
+      expect(await token.balanceOf(bob.address)).to.equal(initialAmount);
+
+      const claimsAfter = await token.getUserClaims(bob.address);
+      expect(claimsAfter.length).to.equal(0);
+    });
+
+    it("Should revert encrypted unshield when caller has no ACL access to the amount", async function () {
+      const { token, bob, alice } = await setupFixture();
+
+      // Bob shields, so bob's balance handle is allowed for bob — not for alice.
+      await token.mint(bob.address, ethers.parseEther("10"));
+      await token.connect(bob).shield(ethers.parseEther("10"));
+
+      const bobBalanceHandle = await token.confidentialBalanceOf(bob.address);
+
+      await expect(
+        token.connect(alice)["unshield(bytes32)"](bobBalanceHandle),
+      ).to.be.revertedWithCustomError(token, "ERC20ConfidentialUnauthorizedUseOfEncryptedAmount");
+    });
+
     it("Should support multiple concurrent unshield claims", async function () {
       const { token, bob, bobClient } = await setupFixture();
 
       await token.mint(bob.address, ethers.parseEther("10"));
       await token.connect(bob).shield(ethers.parseEther("10"));
 
-      const tx1 = await token.connect(bob).unshield(BigInt(3 * 1e6));
+      const tx1 = await token.connect(bob)["unshield(uint64)"](BigInt(3 * 1e6));
       const requestId1 = await getUnshieldRequestId(tx1, token);
 
-      const tx2 = await token.connect(bob).unshield(BigInt(2 * 1e6));
+      const tx2 = await token.connect(bob)["unshield(uint64)"](BigInt(2 * 1e6));
       const requestId2 = await getUnshieldRequestId(tx2, token);
 
       const pendingClaims = await token.getUserClaims(bob.address);
@@ -282,7 +338,7 @@ describe("ERC20Confidential", function () {
         const balanceHandle = await token.confidentialBalanceOf(bob.address);
         await hre.cofhe.mocks.expectPlaintext(balanceHandle, amount);
 
-        const tx = await token.connect(bob).unshield(amount);
+        const tx = await token.connect(bob)["unshield(uint64)"](amount);
         const requestId = await getUnshieldRequestId(tx, token);
 
         await hre.network.provider.send("evm_increaseTime", [11]);
@@ -325,7 +381,7 @@ describe("ERC20Confidential", function () {
         const balanceHandle = await token.confidentialBalanceOf(bob.address);
         await hre.cofhe.mocks.expectPlaintext(balanceHandle, amount);
 
-        const tx = await token.connect(bob).unshield(amount);
+        const tx = await token.connect(bob)["unshield(uint64)"](amount);
         const requestId = await getUnshieldRequestId(tx, token);
 
         await hre.network.provider.send("evm_increaseTime", [11]);
@@ -369,7 +425,7 @@ describe("ERC20Confidential", function () {
         const balanceHandle = await token.confidentialBalanceOf(bob.address);
         await hre.cofhe.mocks.expectPlaintext(balanceHandle, expectedConfidentialAmount);
 
-        const tx = await token.connect(bob).unshield(expectedConfidentialAmount);
+        const tx = await token.connect(bob)["unshield(uint64)"](expectedConfidentialAmount);
         const requestId = await getUnshieldRequestId(tx, token);
 
         await hre.network.provider.send("evm_increaseTime", [11]);
