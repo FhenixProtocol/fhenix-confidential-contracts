@@ -196,6 +196,56 @@ abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC2
         FHE.allowTransient(transferred, msg.sender);
     }
 
+    function confidentialTransferAndCall(
+        address to,
+        euint64 amount,
+        bytes calldata data
+    ) public virtual returns (euint64 transferred) {
+        if (!FHE.isAllowed(amount, msg.sender)) {
+            revert ERC20ConfidentialUnauthorizedUseOfEncryptedAmount(amount, msg.sender);
+        }
+        transferred = _confidentialTransferAndCall(msg.sender, to, amount, data);
+        FHE.allowTransient(transferred, msg.sender);
+    }
+
+    function confidentialTransferAndCall(
+        address to,
+        InEuint64 memory encryptedAmount,
+        bytes calldata data
+    ) public virtual returns (euint64 transferred) {
+        transferred = _confidentialTransferAndCall(msg.sender, to, FHE.asEuint64(encryptedAmount), data);
+        FHE.allowTransient(transferred, msg.sender);
+    }
+
+    function confidentialTransferFromAndCall(
+        address from,
+        address to,
+        euint64 amount,
+        bytes calldata data
+    ) public virtual returns (euint64 transferred) {
+        if (!FHE.isAllowed(amount, msg.sender)) {
+            revert ERC20ConfidentialUnauthorizedUseOfEncryptedAmount(amount, msg.sender);
+        }
+        if (!isOperator(from, msg.sender)) {
+            revert ERC20ConfidentialUnauthorizedSpender(from, msg.sender);
+        }
+        transferred = _confidentialTransferAndCall(from, to, amount, data);
+        FHE.allowTransient(transferred, msg.sender);
+    }
+
+    function confidentialTransferFromAndCall(
+        address from,
+        address to,
+        InEuint64 memory encryptedAmount,
+        bytes calldata data
+    ) public virtual returns (euint64 transferred) {
+        if (!isOperator(from, msg.sender)) {
+            revert ERC20ConfidentialUnauthorizedSpender(from, msg.sender);
+        }
+        transferred = _confidentialTransferAndCall(from, to, FHE.asEuint64(encryptedAmount), data);
+        FHE.allowTransient(transferred, msg.sender);
+    }
+
     // =========================================================================
     //  Operators
     // =========================================================================
@@ -237,6 +287,18 @@ abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC2
         if (from == address(0)) revert ERC20InvalidSender(address(0));
         if (to == address(0)) revert ERC20InvalidReceiver(address(0));
         transferred = _confidentialUpdate(from, to, value);
+    }
+
+    function _confidentialTransferAndCall(
+        address from,
+        address to,
+        euint64 amount,
+        bytes calldata data
+    ) internal virtual returns (euint64 transferred) {
+        euint64 sent = _confidentialTransfer(from, to, amount);
+        ebool success = FHERC20Utils.checkOnTransferReceived(msg.sender, from, to, sent, data);
+        euint64 refund = _confidentialUpdate(to, from, FHE.select(success, FHE.asEuint64(0), sent));
+        transferred = FHE.sub(sent, refund);
     }
 
     function _unshield(euint64 amount, uint64 requestedAmount) internal virtual returns (euint64 burned) {
