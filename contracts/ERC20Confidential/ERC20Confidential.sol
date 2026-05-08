@@ -2,11 +2,16 @@
 pragma solidity ^0.8.25;
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { FHE, euint64, InEuint64, ebool } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { IFHERC20, IERC7984 } from "../interfaces/IFHERC20.sol";
 import { IERC20Confidential } from "../interfaces/IERC20Confidential.sol";
 import { ERC20ConfidentialIndicator } from "./ERC20ConfidentialIndicator.sol";
 import { FHESafeMath } from "../utils/FHESafeMath.sol";
+import { FHERC20Utils } from "../FHERC20/utils/FHERC20Utils.sol";
 import { FHERC20WrapperClaimHelper } from "../FHERC20/utils/FHERC20WrapperClaimHelper.sol";
 
 /**
@@ -23,7 +28,7 @@ import { FHERC20WrapperClaimHelper } from "../FHERC20/utils/FHERC20WrapperClaimH
  * encrypted amount publicly decryptable, then {claimUnshielded} verifies the decryption
  * proof and transfers public tokens from the pool.
  */
-abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20WrapperClaimHelper {
+abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC20WrapperClaimHelper {
     address public constant CONFIDENTIAL_POOL = address(0x1011000000000000000000000000000000000000);
 
     mapping(address => euint64) private _confidentialBalances;
@@ -46,12 +51,57 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20Wrapper
         _conversionRate = decimals_ > 6 ? 10 ** (decimals_ - 6) : 1;
     }
 
-    function decimals() public view virtual override returns (uint8) {
+    // =========================================================================
+    //  ERC-165
+    // =========================================================================
+
+    function supportsInterface(bytes4 interfaceId) public view virtual override(IERC165, ERC165) returns (bool) {
+        return
+            interfaceId == type(IERC20Confidential).interfaceId ||
+            interfaceId == type(IFHERC20).interfaceId ||
+            interfaceId == type(IERC7984).interfaceId ||
+            interfaceId == type(IERC20).interfaceId ||
+            super.supportsInterface(interfaceId);
+    }
+
+    // =========================================================================
+    //  Metadata
+    // =========================================================================
+
+    function name() public view virtual override(ERC20, IERC7984) returns (string memory) {
+        return super.name();
+    }
+
+    function symbol() public view virtual override(ERC20, IERC7984) returns (string memory) {
+        return super.symbol();
+    }
+
+    function decimals() public view virtual override(ERC20, IERC7984) returns (uint8) {
         return _decimals;
     }
 
     function confidentialDecimals() public view virtual returns (uint8) {
         return _confidentialDecimals;
+    }
+
+    function contractURI() public view virtual returns (string memory) {
+        return "";
+    }
+
+    /// @dev `false` because {balanceOf} returns the real public ERC-20 balance, not an indicator.
+    function balanceOfIsIndicator() public pure virtual returns (bool) {
+        return false;
+    }
+
+    /// @dev Always `0`: {balanceOf} is not an indicator on this token.
+    function indicatorTick() public pure virtual returns (uint256) {
+        return 0;
+    }
+
+    /// @dev Derived from the public balance held in {CONFIDENTIAL_POOL}. Includes any tokens
+    /// burned via {unshield} that have not yet been claimed via {claimUnshielded}.
+    function confidentialTotalSupply() public view virtual returns (euint64) {
+        return _confidentialBalances[CONFIDENTIAL_POOL];
     }
 
     function confidentialBalanceOf(address account) public view virtual returns (euint64) {
@@ -113,10 +163,7 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20Wrapper
         FHE.allowTransient(transferred, msg.sender);
     }
 
-    function confidentialTransfer(
-        address to,
-        InEuint64 memory inValue
-    ) public virtual returns (euint64 transferred) {
+    function confidentialTransfer(address to, InEuint64 memory inValue) public virtual returns (euint64 transferred) {
         transferred = _confidentialTransfer(msg.sender, to, FHE.asEuint64(inValue));
         FHE.allowTransient(transferred, msg.sender);
     }
@@ -202,9 +249,7 @@ abstract contract ERC20Confidential is ERC20, IERC20Confidential, FHERC20Wrapper
             _confidentialBalances[from] = ptr;
         }
 
-        transferred = from != address(0)
-            ? FHE.select(success, amount, FHE.asEuint64(0))
-            : amount;
+        transferred = from != address(0) ? FHE.select(success, amount, FHE.asEuint64(0)) : amount;
 
         if (to != address(0)) {
             ptr = FHE.add(_confidentialBalances[to], transferred);
