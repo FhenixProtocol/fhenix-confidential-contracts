@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+### Patch Changes
+
+- 6e30218: Add new 'unshield' overload function that accepts an encrypted amount.
+
 ## 0.3.1
 
 ### Patch Changes
