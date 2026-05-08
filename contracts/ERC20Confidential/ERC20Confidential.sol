@@ -33,6 +33,7 @@ abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC2
 
     mapping(address => euint64) private _confidentialBalances;
     mapping(address => mapping(address => uint48)) private _operators;
+    euint64 private _confidentialTotalSupply;
 
     ERC20ConfidentialIndicator public immutable indicatorToken;
 
@@ -98,10 +99,10 @@ abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC2
         return 0;
     }
 
-    /// @dev Derived from the public balance held in {CONFIDENTIAL_POOL}. Includes any tokens
-    /// burned via {unshield} that have not yet been claimed via {claimUnshielded}.
+    /// @dev Pegged to {CONFIDENTIAL_POOL}'s public balance, refreshed by {_update} whenever
+    /// public tokens enter or leave the pool. Made publicly decryptable.
     function confidentialTotalSupply() public view virtual returns (euint64) {
-        return _confidentialBalances[CONFIDENTIAL_POOL];
+        return _confidentialTotalSupply;
     }
 
     function confidentialBalanceOf(address account) public view virtual returns (euint64) {
@@ -215,6 +216,18 @@ abstract contract ERC20Confidential is ERC20, ERC165, IERC20Confidential, FHERC2
     // =========================================================================
     //  Internal helpers
     // =========================================================================
+
+    /// @dev Refresh {_confidentialTotalSupply} whenever public tokens enter or leave the pool.
+    function _update(address from, address to, uint256 value) internal virtual override {
+        super._update(from, to, value);
+
+        if (to == CONFIDENTIAL_POOL || from == CONFIDENTIAL_POOL) {
+            euint64 newSupply = FHE.asEuint64(SafeCast.toUint64(balanceOf(CONFIDENTIAL_POOL) / _rate()));
+            FHE.allowThis(newSupply);
+            FHE.allowPublic(newSupply);
+            _confidentialTotalSupply = newSupply;
+        }
+    }
 
     function _confidentialTransfer(
         address from,
