@@ -366,7 +366,7 @@ abstract contract FHERC20 is IFHERC20, Context, ERC165 {
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);
             _balances[from] = ptr;
-            _indicatedBalances[from] = _decrementIndicator(_indicatedBalances[from]);
+           _indicatedBalances[to] = _incrementIndicator(_indicatedBalances[to]);
         }
 
         transferred = FHE.select(success, amount, FHE.asEuint64(0));
@@ -388,7 +388,7 @@ abstract contract FHERC20 is IFHERC20, Context, ERC165 {
         if (to != address(0)) FHE.allow(transferred, to);
         FHE.allowThis(transferred);
 
-        emit Transfer(from, to, uint256(_INDICATOR_TRANSFER) * _indicatorTick);
+        // Removing these lines emit Transfer
         emit ConfidentialTransfer(from, to, transferred);
     }
 }
