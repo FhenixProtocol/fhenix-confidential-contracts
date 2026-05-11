@@ -379,7 +379,7 @@ abstract contract FHERC20Upgradeable is Initializable, IFHERC20, ContextUpgradea
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);
             $._balances[from] = ptr;
-            $._indicatedBalances[from] = _decrementIndicator($._indicatedBalances[from]);
+            // Removing these line over here
         }
 
         transferred = FHE.select(success, amount, FHE.asEuint64(0));
@@ -394,14 +394,14 @@ abstract contract FHERC20Upgradeable is Initializable, IFHERC20, ContextUpgradea
             FHE.allowThis(ptr);
             FHE.allow(ptr, to);
             $._balances[to] = ptr;
-            $._indicatedBalances[to] = _incrementIndicator($._indicatedBalances[to]);
+            // removing here too 
         }
 
         if (from != address(0)) FHE.allow(transferred, from);
         if (to != address(0)) FHE.allow(transferred, to);
         FHE.allowThis(transferred);
 
-        emit Transfer(from, to, uint256(_INDICATOR_TRANSFER) * $._indicatorTick);
+        // Removing these line here as well 
         emit ConfidentialTransfer(from, to, transferred);
     }
 }
