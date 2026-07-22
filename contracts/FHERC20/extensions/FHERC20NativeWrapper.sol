@@ -79,17 +79,23 @@ abstract contract FHERC20NativeWrapper is FHERC20, IFHERC20NativeWrapper, FHERC2
         if (alignedValue == 0) revert AmountTooSmallForConfidentialPrecision();
 
         uint256 dust = msg.value - alignedValue;
+        uint64 confidentialAmount = SafeCast.toUint64(alignedValue / rate());
+
+        // Mint and emit BEFORE refunding dust (checks-effects-interactions).
+        // The previous order sent dust via .call before calling _mint, allowing
+        // a malicious recipient to re-enter shieldNative (or any other payable
+        // function on this contract) while the confidential balance has not yet
+        // been credited, enabling double-shield attacks.
+        euint64 shieldedAmountSent = _mint(to, FHE.asEuint64(confidentialAmount));
+        FHE.allowTransient(shieldedAmountSent, msg.sender);
+        emit ShieldedNative(msg.sender, to, alignedValue);
+
+        // Refund dust after all state changes are finalized.
         if (dust > 0) {
             (bool refunded, ) = msg.sender.call{ value: dust }("");
             if (!refunded) revert NativeTransferFailed();
         }
 
-        uint64 confidentialAmount = SafeCast.toUint64(alignedValue / rate());
-
-        euint64 shieldedAmountSent = _mint(to, FHE.asEuint64(confidentialAmount));
-        FHE.allowTransient(shieldedAmountSent, msg.sender);
-
-        emit ShieldedNative(msg.sender, to, alignedValue);
         return shieldedAmountSent;
     }
 
