@@ -280,6 +280,12 @@ abstract contract FHERC20 is IFHERC20, Context, ERC165 {
      * `encryptedAmount` to request disclosure of the encrypted amount `encryptedAmount`.
      */
     function requestDiscloseEncryptedAmount(euint64 encryptedAmount) public virtual {
+        // Guard against uninitialized (zero) handles. Passing an uninitialized handle
+        // would pass the isAllowed check if the caller holds no permissions (allowPublic
+        // on a zero handle is a no-op but emits a misleading event), or it could interact
+        // with unrelated task-manager entries that share the zero-handle slot.
+        if (!FHE.isInitialized(encryptedAmount))
+            revert FHERC20ZeroBalance(msg.sender);
         if (!FHE.isAllowed(encryptedAmount, msg.sender))
             revert FHERC20UnauthorizedUseOfEncryptedAmount(encryptedAmount, msg.sender);
 
