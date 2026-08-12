@@ -3,6 +3,7 @@ import hre, { ethers } from "hardhat";
 import { FHERC20NativeWrapper_Harness, WETH_Harness } from "../typechain-types";
 import { expectFHERC20BalancesChange, prepExpectFHERC20BalancesChange } from "./utils";
 import { ZeroAddress, ContractTransactionResponse } from "ethers";
+import { getIFHERC20NativeWrapperInterfaceId } from "./FHERC20.behavior";
 
 async function getUnshieldRequestId(
   tx: ContractTransactionResponse,
@@ -72,6 +73,8 @@ describe("FHERC20NativeWrapper", function () {
 
       // ERC165
       expect(await eETH.supportsInterface("0x01ffc9a7")).to.equal(true);
+      // IFHERC20NativeWrapper
+      expect(await eETH.supportsInterface(getIFHERC20NativeWrapperInterfaceId())).to.equal(true);
       // Random unsupported
       expect(await eETH.supportsInterface("0xdeadbeef")).to.equal(false);
     });
