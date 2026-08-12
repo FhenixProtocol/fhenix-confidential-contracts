@@ -73,6 +73,29 @@ export function getIFHERC20InterfaceId(): string {
   return computeInterfaceId(["balanceOfIsIndicator()", "indicatorTick()"]);
 }
 
+export function getIFHERC20ERC20WrapperInterfaceId(): string {
+  return computeInterfaceId([
+    "shield(address,uint256)",
+    "unshield(address,address,uint64)",
+    "unshield(address,address,bytes32)",
+    "claimUnshielded(bytes32,uint64,bytes)",
+    "rate()",
+    "underlying()",
+  ]);
+}
+
+export function getIFHERC20NativeWrapperInterfaceId(): string {
+  return computeInterfaceId([
+    "shieldWrappedNative(address,uint256)",
+    "shieldNative(address)",
+    "unshield(address,address,uint64)",
+    "unshield(address,address,bytes32)",
+    "claimUnshielded(bytes32,uint64,bytes)",
+    "rate()",
+    "weth()",
+  ]);
+}
+
 // =========================================================================
 //  Shared behavior suites
 // =========================================================================

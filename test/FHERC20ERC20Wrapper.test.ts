@@ -8,6 +8,7 @@ import {
   prepExpectFHERC20BalancesChange,
 } from "./utils";
 import { ZeroAddress, ContractTransactionResponse } from "ethers";
+import { getIFHERC20ERC20WrapperInterfaceId } from "./FHERC20.behavior";
 
 // The unshield flow involves TWO distinct identifiers (they used to coincide when claims were
 // keyed by the ciphertext handle):
@@ -95,6 +96,8 @@ describe("FHERC20ERC20Wrapper", function () {
 
       // ERC165
       expect(await eBTC.supportsInterface("0x01ffc9a7")).to.equal(true);
+      // IFHERC20ERC20Wrapper
+      expect(await eBTC.supportsInterface(getIFHERC20ERC20WrapperInterfaceId())).to.equal(true);
       // IERC1363Receiver
       expect(await eBTC.supportsInterface("0x88a7ca5c")).to.equal(true);
       // Random unsupported
