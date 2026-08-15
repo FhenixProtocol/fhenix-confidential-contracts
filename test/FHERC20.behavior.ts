@@ -213,6 +213,72 @@ export function shouldBehaveLikeFHERC20(setupFixture: SetupFixtureFn, deployWith
       await expectFHERC20BalancesChange(token, bob.address, 0n);
       await expectFHERC20BalancesChange(token, alice.address, 0n);
     });
+
+    it("should leave balance unchanged after a partial self-transfer", async function () {
+      const { token, bob, bobClient } = await setupFixture();
+
+      const mintValue = 10_000_000n;
+      await token.mint(bob.address, mintValue);
+
+      const transferValue = 1_000_000n;
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(transferValue)]).execute();
+
+      await prepExpectFHERC20BalancesChange(token, bob.address);
+
+      await expect(
+        token
+          .connect(bob)
+          ["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](bob.address, encTransferInput),
+      ).to.emit(token, "ConfidentialTransfer");
+
+      await expectFHERC20BalancesChange(token, bob.address, 0n);
+    });
+
+    it("should leave balance unchanged after a full-balance self-transfer", async function () {
+      const { token, bob, bobClient } = await setupFixture();
+
+      const mintValue = 10_000_000n;
+      await token.mint(bob.address, mintValue);
+
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(mintValue)]).execute();
+
+      await prepExpectFHERC20BalancesChange(token, bob.address);
+
+      await expect(
+        token
+          .connect(bob)
+          ["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](bob.address, encTransferInput),
+      ).to.emit(token, "ConfidentialTransfer");
+
+      await expectFHERC20BalancesChange(token, bob.address, 0n);
+    });
+
+    it("should leave both balances unchanged after a zero-value transfer", async function () {
+      const { token, bob, alice, bobClient } = await setupFixture();
+
+      const mintValue = 10_000_000n;
+      await token.mint(bob.address, mintValue);
+      await token.mint(alice.address, mintValue);
+
+      const [encTransferInput] = await bobClient.encryptInputs([Encryptable.uint64(0n)]).execute();
+
+      await prepExpectFHERC20BalancesChange(token, bob.address);
+      await prepExpectFHERC20BalancesChange(token, alice.address);
+
+      // NOTE: a 0-value transfer still ticks both parties' ERC-20 indicator counters -
+      // FHERC20.sol:_update increments/decrements _indicatedBalances unconditionally
+      // whenever from/to are non-zero addresses, regardless of the transferred amount.
+      // This test only asserts the *confidential* balance is unchanged; it does not
+      // assert on balanceOf()/indicatorTick(), which do move even though no value moved.
+      await expect(
+        token
+          .connect(bob)
+          ["confidentialTransfer(address,(uint256,uint8,uint8,bytes))"](alice.address, encTransferInput),
+      ).to.emit(token, "ConfidentialTransfer");
+
+      await expectFHERC20BalancesChange(token, bob.address, 0n);
+      await expectFHERC20BalancesChange(token, alice.address, 0n);
+    });
   });
 
   describe("operator management", function () {
