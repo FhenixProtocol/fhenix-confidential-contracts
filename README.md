@@ -77,7 +77,7 @@ pragma solidity ^0.8.25;
 import { FHERC20 } from "fhenix-confidential-contracts/contracts/FHERC20.sol";
 
 contract MyConfidentialToken is FHERC20 {
-    constructor() FHERC20("My Confidential Token", "eMCT", 18) {
+    constructor() FHERC20("My Confidential Token", "eMCT", 18, "") {
         // Mint initial supply to deployer
         _mint(msg.sender, 1000000 * 10**18);
     }
@@ -95,7 +95,7 @@ import { FHERC20Permit } from "fhenix-confidential-contracts/contracts/FHERC20Pe
 
 contract MyPermitToken is FHERC20, FHERC20Permit {
     constructor()
-        FHERC20("My Permit Token", "eMPT", 18)
+        FHERC20("My Permit Token", "eMPT", 18, "")
         FHERC20Permit("My Permit Token")
     {
         _mint(msg.sender, 1000000 * 10**18);
@@ -109,12 +109,13 @@ contract MyPermitToken is FHERC20, FHERC20Permit {
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { FHERC20Wrapper } from "fhenix-confidential-contracts/contracts/FHERC20Wrapper.sol";
+import { FHERC20ERC20Wrapper } from "fhenix-confidential-contracts/contracts/FHERC20/extensions/FHERC20ERC20Wrapper.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract MyWrappedToken is FHERC20Wrapper {
+contract MyWrappedToken is FHERC20ERC20Wrapper {
     constructor(IERC20 underlyingToken)
-        FHERC20Wrapper(underlyingToken, "")
+        FHERC20ERC20Wrapper(underlyingToken)
+        FHERC20("My Wrapped Token", "eMWT", 18, "")
     {}
 }
 
