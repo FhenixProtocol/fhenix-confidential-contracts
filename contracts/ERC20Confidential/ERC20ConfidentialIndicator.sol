@@ -10,6 +10,14 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * Designed to be added to wallets and block explorers to show confidential activity
  * without exposing real amounts. All standard ERC-20 operations revert; only the parent
  * ERC20Confidential contract can trigger indicator updates.
+ *
+ * Indicator counter semantics:
+ * - `_indicatedBalances[account]` lives in `1..9999` (bootstrapped on first touch).
+ * - Once the counter hits a bound (`9999` on receive / `1` on send) further moves for
+ *   that direction are intentionally silent no-ops — saturation is by design so the
+ *   indicator never reveals a precise transfer count past the band.
+ * - `address(0)` is skipped in `emitConfidentialTransfer` so mints/burns do not give
+ *   the zero address a drifting `balanceOf` reading (explorers treat it as empty).
  */
 contract ERC20ConfidentialIndicator is ERC20 {
     address public immutable parent;
@@ -60,8 +68,14 @@ contract ERC20ConfidentialIndicator is ERC20 {
     }
 
     function emitConfidentialTransfer(address from, address to) public onlyParent {
-        _incrementIndicatedBalance(to);
-        _decrementIndicatedBalance(from);
+        // Skip the zero address: mint/burn paths pass address(0) as from/to, and
+        // explorers expect balanceOf(0) to stay at the synthetic baseline.
+        if (to != address(0)) {
+            _incrementIndicatedBalance(to);
+        }
+        if (from != address(0)) {
+            _decrementIndicatedBalance(from);
+        }
         emit Transfer(from, to, 10110000001);
     }
 
