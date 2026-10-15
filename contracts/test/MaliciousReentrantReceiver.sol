@@ -17,7 +17,7 @@ import { ebool, euint64, sharedEbool, sharedEuint64, FHE } from "@fhenixprotocol
  * token via `confidentialTransfer` and sweeps the just-received balance to
  * `attacker`, then returns `false` to request a refund. When the refund leg
  * tries to debit this contract, its balance is already 0, so the saturating
- * `trySpend` is a no-op — nothing is clawed back. Net result: the sender is
+ * `tryDecrease` is a no-op — nothing is clawed back. Net result: the sender is
  * debited, the refund returns nothing, and `attacker` keeps the funds.
  */
 contract MaliciousReentrantReceiver is IERC7984Receiver {
@@ -48,7 +48,7 @@ contract MaliciousReentrantReceiver is IERC7984Receiver {
         }
 
         // Signal "rejected — please refund the sender". The refund leg will try to
-        // debit us `amount`, but our balance is now 0, so trySpend saturates to
+        // debit us `amount`, but our balance is now 0, so tryDecrease saturates to
         // a no-op and the sender is never made whole.
         ebool rejected = FHE.asEbool(false);
         return FHE.shareEbool(rejected, msg.sender);

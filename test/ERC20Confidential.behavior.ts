@@ -392,7 +392,7 @@ export function shouldBehaveLikeERC20Confidential(
       expect(await indicator.balanceOf(alice.address)).to.equal(10110005001n);
     });
 
-    // The debit is saturating and all-or-nothing (FHESafeMath.trySpend): an over-balance transfer
+    // The debit is saturating and all-or-nothing (FHESafeMath.tryDecrease): an over-balance transfer
     // moves NOTHING rather than reverting or draining what is there. Asserted on the event's
     // transferred handle as well as the balances, since the credit leg is driven by exactly that
     // value — if it ever reported the requested amount instead of the debited one, the recipient
@@ -417,7 +417,7 @@ export function shouldBehaveLikeERC20Confidential(
       await hre.cofhe.mocks.expectPlaintext(await token.confidentialBalanceOf(alice.address), 0n);
     });
 
-    // The sender's balance slot is still the zero handle here, which is a distinct trySpend branch
+    // The sender's balance slot is still the zero handle here, which is a distinct tryDecrease branch
     // from "initialized but too small" — and one this path can actually reach, since the
     // confidential core has no zero-balance guard (unlike FHERC20Core, which reverts). It must
     // no-op rather than revert, and must leave both parties holding real, decryptable handles.

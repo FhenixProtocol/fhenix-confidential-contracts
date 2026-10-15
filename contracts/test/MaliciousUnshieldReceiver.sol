@@ -15,7 +15,7 @@ interface IReentrantUnshield {
  * it re-enters `unshield` to burn its just-credited balance into a pending claim
  * for `attacker`, then returns `false` to request a refund.
  *
- * Without the reentrancy guard the refund's saturating `trySpend` would find a
+ * Without the reentrancy guard the refund's saturating `tryDecrease` would find a
  * zero balance (already burned) and no-op, so the sender is debited AND the
  * attacker walks away with a claim on the wrapper's underlying. The `nonReentrant`
  * guard on `unshield` makes the re-entrant call revert, which bubbles up through

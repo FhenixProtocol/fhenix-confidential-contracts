@@ -45,7 +45,7 @@
     "beta:snapshot": "changeset version --snapshot beta && changeset publish --tag beta"
   },
   "dependencies": {
-    "@fhenixprotocol/cofhe-contracts": "0.2.0",
+    "@fhenixprotocol/cofhe-contracts": "1.0.0",
     "@openzeppelin/contracts": "^5.2.0",
     "@openzeppelin/contracts-upgradeable": "5.4.0",
     "@typechain/ethers-v6": "~0.5.1",
@@ -55,9 +55,9 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
-    "@cofhe/hardhat-plugin": "0.7.0",
-    "@cofhe/mock-contracts": "0.7.0",
-    "@cofhe/sdk": "0.7.0",
+    "@cofhe/hardhat-plugin": "0.8.0",
+    "@cofhe/mock-contracts": "0.8.0",
+    "@cofhe/sdk": "0.8.0",
     "@ethersproject/abi": "~5.7.0",
     "@ethersproject/providers": "~5.7.2",
     "@nomicfoundation/hardhat-chai-matchers": "~2.0.7",

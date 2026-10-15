@@ -3,6 +3,7 @@ pragma solidity ^0.8.25;
 
 import { euint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { ERC20ConfidentialLib } from "../../ERC20Confidential/ERC20ConfidentialLib.sol";
+import { FHERC20InvalidReceiver, FHERC20UnauthorizedSpender } from "./FHERC20Errors.sol";
 
 /**
  * @dev Thin shared claim bookkeeping for {FHERC20} wrapper contracts, over the linked
@@ -24,6 +25,16 @@ abstract contract FHERC20WrapperClaims {
     error ClaimNotFound();
     error AlreadyClaimed();
     error ClaimBatchLengthMismatch();
+    error InvalidDecryptionProof();
+
+    /// @notice Emitted when a pending claim is re-pointed at a new recipient.
+    event ClaimReassigned(bytes32 indexed id, address indexed previousTo, address indexed newTo);
+
+    /// @dev Host-supplied operator check, so the claim-owner gate below honours the same operator
+    /// rules the rest of the token uses. An internal hook rather than a re-declaration of the
+    /// host's public `isOperator`, which would force every wrapper core inheriting both this and
+    /// {FHERC20Core} to write an explicit `override(...)` disambiguation.
+    function _isClaimOperator(address holder, address spender) internal view virtual returns (bool);
 
     /// @notice Pending-claim views, keyed by the unique claim id (NOT the ciphertext handle).
     function getClaim(bytes32 id) public view returns (ERC20ConfidentialLib.Claim memory) {
@@ -32,6 +43,34 @@ abstract contract FHERC20WrapperClaims {
 
     function getUserClaims(address user) public view returns (ERC20ConfidentialLib.Claim[] memory) {
         return ERC20ConfidentialLib.getUserClaims(user);
+    }
+
+    /**
+     * @notice Re-points an unsettled claim at `newTo`. Callable by the claim's current recipient
+     * or an operator acting for them.
+     *
+     * A claim's recipient is fixed at burn time and settlement pays that address unconditionally,
+     * so a recipient that cannot accept the payout — a contract with no payable fallback on a
+     * native wrapper, a blocklisted address on an ERC-20 wrapper — would otherwise strand the
+     * burned value in the wrapper forever (Consensys Diligence 5.13). Reassignment is the escape
+     * hatch: the value is already the recipient's, so only the recipient may redirect it.
+     *
+     * The claim keeps its id, so a decryption proof obtained before the reassignment stays valid.
+     */
+    function reassignClaim(bytes32 id, address newTo) public virtual {
+        if (newTo == address(0)) revert FHERC20InvalidReceiver(newTo);
+
+        address previousTo = ERC20ConfidentialLib.getClaim(id).to;
+        if (previousTo == address(0)) revert ClaimNotFound();
+        _checkClaimRecipient(previousTo);
+
+        ERC20ConfidentialLib.reassignClaim(id, newTo);
+        emit ClaimReassigned(id, previousTo, newTo);
+    }
+
+    /// @dev Reverts unless the caller is `to` or an operator acting for `to`.
+    function _checkClaimRecipient(address to) internal view {
+        if (!_isClaimOperator(to, msg.sender)) revert FHERC20UnauthorizedSpender(to, msg.sender);
     }
 
     /// @dev Records a pending claim; returns its unique id.

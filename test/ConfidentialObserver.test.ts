@@ -4,7 +4,7 @@ import hre, { ethers } from "hardhat";
 // Validates the compliance-observer feature AND the EIP-170 relocation of
 // shield/unshield/mint into ERC20ConfidentialLib (reached via the self-only
 // `__ledger` bridge), against the real CoFHE mocks. Uses a minimal confidential
-// token harness (no M0 base) that shares the exact core + library FUSDJmi uses.
+// token harness that shares the exact core + library production hosts use.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
 const POOL = "0x1011000000000000000000000000000000000000";
 
@@ -20,7 +20,7 @@ async function deployHarness() {
   return h;
 }
 
-describe("Confidential observer + relocation (FUSDJmi feature)", () => {
+describe("Confidential observer + relocation", () => {
   it("mint routes through the __ledger bridge and credits a confidential balance", async () => {
     const [, alice] = await ethers.getSigners();
     const h = await deployHarness();
