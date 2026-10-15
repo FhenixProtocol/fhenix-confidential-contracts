@@ -6,3 +6,26 @@ find the full documentation for it [in our repository](https://github.com/change
 
 We have a quick list of common questions to get you started engaging with this project in
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md).
+
+## Publishing
+
+Workflow: `.github/workflows/publish.yml`. Publishing uses npm trusted publishing (OIDC), so no npm token is needed.
+
+| Event | Condition | Job(s) fired |
+|---|---|---|
+| `push` to `master` | not the bot's Version Packages PR | `version-packages`, `release-gate`, `beta-snapshot` |
+| `push` to `master` | merge of the bot's Version Packages PR | `version-packages`, `release-gate`, `stable-release` |
+| `workflow_dispatch` | any branch | `named-release` |
+
+- `release-gate` looks up the PR for the pushed commit and reports `is_release=true` only for a merged PR from `changeset-release/master`, in this repo (not a fork), authored by `github-actions[bot]`. The commit message is not used, so a PR titled "Version Packages" does not trigger a stable release. If the gate fails, neither publish job runs.
+- `beta-snapshot` publishes `0.0.0-beta-<timestamp>` under the `beta` dist-tag. It skips when there are no pending changesets, because otherwise the `package.json` version would be published as-is.
+- `stable-release` runs `pnpm release` and publishes under `latest`, with GitHub releases and tags.
+
+### Manual named release
+
+Go to **Actions → Publish → Run workflow**, pick a branch, and optionally fill in:
+
+- `version` (default blank): a semver prerelease such as `1.0.0-alpha.1`. It must not already be on npm. The package is set to exactly this version, so no pending changeset is needed (e.g. run from `changeset-release/master` to prerelease the upcoming stable).
+- `dist_tag` (default `alpha`): lowercase, and not `latest`.
+
+If `version` is left blank, the job publishes a `0.0.0-<dist_tag>-<timestamp>` snapshot from pending changesets. It fails early when there are none.

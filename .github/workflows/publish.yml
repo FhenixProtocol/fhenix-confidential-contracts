@@ -3,6 +3,16 @@ name: Publish
 on:
   push:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Prerelease version (e.g. 1.0.0-beta.0). Leave blank for a 0.0.0-<dist_tag>-<timestamp> snapshot'
+        required: false
+        default: ''
+      dist_tag:
+        description: 'npm dist-tag to publish under'
+        required: false
+        default: alpha
 
 permissions:
   id-token: write
@@ -14,6 +24,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   # Create (or update) the Version Packages pull request when PR merged containing a changeset
   version-packages:
+    if: ${{ github.event_name == 'push' }}
     name: Version Packages
     runs-on: ubuntu-latest
     steps:
@@ -38,9 +49,100 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # A push only counts as a stable release if it is the merge of the changesets bot's
+  # Version Packages PR. Keyed on the PR (bot author, same-repo head branch), not the
+  # commit message, so contributors cannot trigger a release by naming a PR.
+  release-gate:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    outputs:
+      is_release: ${{ steps.check.outputs.is_release }}
+    steps:
+      - name: Check for merged changesets bot PR
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The commit -> PR association can lag slightly behind the push
+          for attempt in 1 2 3; do
+            prs=$(gh api "repos/$REPO/commits/$SHA/pulls")
+            [ "$(jq length <<< "$prs")" -gt 0 ] && break
+            sleep 10
+          done
+          is_release=$(jq --arg repo "$REPO" 'any(.[];
+            .merged_at != null
+            and .head.ref == "changeset-release/master"
+            and .head.repo.full_name == $repo
+            and .user.login == "github-actions[bot]")' <<< "$prs")
+          echo "is_release=$is_release" >> "$GITHUB_OUTPUT"
+          echo "is_release=$is_release"
+
+  # Manually publish a prerelease from any branch via workflow_dispatch.
+  # Blank version: 0.0.0-<dist_tag>-<timestamp> snapshot from pending changesets.
+  # Explicit version: the package is set to that version as-is.
+  named-release:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      DIST_TAG: ${{ inputs.dist_tag }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [[ ! "$DIST_TAG" =~ ^[a-z][a-z0-9-]*$ ]] || [ "$DIST_TAG" = latest ]; then
+            echo "::error::Invalid dist-tag '$DIST_TAG' (lowercase, not 'latest')"; exit 1
+          fi
+          if [ -n "$VERSION" ]; then
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+              echo "::error::'$VERSION' must be a semver prerelease (e.g. 1.0.0-beta.0)"; exit 1
+            fi
+            if [ -n "$(npm view "$(jq -r .name package.json)@$VERSION" version 2>/dev/null)" ]; then
+              echo "::error::$VERSION is already published"; exit 1
+            fi
+          elif ! find .changeset -name '*.md' ! -name README.md | grep -q .; then
+            # Without pending changesets the snapshot is a no-op and the real version would publish
+            echo "::error::No pending changesets to snapshot; pass an explicit version instead"; exit 1
+          fi
+
+      - name: Setup pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # npm >= 11.5.1 is required for trusted publishing; the major is pinned so a
+      # new npm major (12 broke publishing) can never land here unannounced.
+      - name: Pin npm 11
+        run: npm i -g npm@11
+
+      - name: Install Dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Set explicit version
+        if: ${{ inputs.version != '' }}
+        run: jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+
+      - name: Publish Named Release
+        run: |
+          if [ -z "$VERSION" ]; then
+            pnpm exec changeset version --snapshot "$DIST_TAG"
+          fi
+          pnpm exec changeset publish --tag "$DIST_TAG"
+
   # Publish beta snapshots upon merge to master
   beta-snapshot:
-    if: ${{ !contains(github.event.head_commit.message, 'Version Packages') }}
+    needs: release-gate
+    if: ${{ needs.release-gate.outputs.is_release != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
@@ -66,11 +168,18 @@ jobs:
         run: pnpm i --frozen-lockfile
 
       - name: Publish Beta Snapshot
-        run: pnpm run beta:snapshot
+        run: |
+          # Without pending changesets the snapshot is a no-op and the package.json version
+          # would publish as-is (e.g. a non-bot PR that bumps the version)
+          if ! find .changeset -name '*.md' ! -name README.md | grep -q .; then
+            echo "No pending changesets, skipping beta snapshot"; exit 0
+          fi
+          pnpm run beta:snapshot
 
-  # Publish stable releases when the Version Packages pull request is merged
+  # Publish stable releases when the changesets bot's Version Packages PR is merged
   stable-release:
-    if: ${{ contains(github.event.head_commit.message, 'Version Packages') }}
+    needs: release-gate
+    if: ${{ needs.release-gate.outputs.is_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
