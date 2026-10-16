@@ -4,54 +4,63 @@
 [![CI Status](https://github.com/FhenixProtocol/fhenix-confidential-contracts/actions/workflows/test.yml/badge.svg)](https://github.com/FhenixProtocol/fhenix-confidential-contracts/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**A privacy-preserving FHERC-20 token standard implementation built on Fhenix Protocol's Fully Homomorphic Encryption (FHE).**
+**Confidential ERC-20 tokens for Fhenix CoFHE: an ERC-7984 (FHERC-20) implementation, confidential
+wrappers for ERC-20 and native tokens, and a dual-ledger confidential layer for existing ERC-20s.**
 
-> **Warning**: These contracts are in active development and have not been audited. Use at your own risk.
+Balances and transfer amounts are encrypted on-chain with Fully Homomorphic Encryption, while the
+contracts still expose a standard token surface to wallets and indexers.
 
-## Overview
+> **Audit status.** The contracts in this package were reviewed by Consensys Diligence (September
+> 2026), except the two UUPS wrapper hosts (`FHERC20ERC20WrapperUUPS`, `FHERC20NativeWrapperUUPS`),
+> which are not audited. Every finding that applies to the audited contracts is fixed or
+> acknowledged; see [docs/audits](./docs/audits/README.md) for the scope and per-finding outcomes.
 
-This library provides Solidity smart contracts for confidential ERC-20 tokens using FHE. Token balances and transfer amounts remain encrypted on-chain while still supporting standard token operations.
+## What's in the package
 
-### Key Features
-
-- **FHERC20** - Base confidential token with encrypted balances
-- **FHERC20Permit** - EIP-712 signature-based operator approval
-- **FHERC20Wrapper** - Wrap standard ERC-20 tokens into confidential tokens
-- **FHERC20UnwrapClaim** - Claim management for unwrapping back to ERC-20
+| Contract                                                   | Use it to                                                                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `FHERC20` / `FHERC20Upgradeable`                           | Build a fully confidential token (ERC-7984 + FHERC-20 indicator layer).                                         |
+| `FHERC20ERC20Wrapper` / `FHERC20ERC20WrapperUpgradeable`   | Wrap an existing ERC-20 into a confidential token.                                                              |
+| `FHERC20NativeWrapper` / `FHERC20NativeWrapperUpgradeable` | Wrap the chain's native token (or WETH) into a confidential token.                                              |
+| `FHERC20ERC20WrapperUUPS` / `FHERC20NativeWrapperUUPS`     | Deploy a wrapper as-is behind an `ERC1967Proxy`: concrete, ownable (2-step), UUPS-upgradeable. **Not audited.** |
+| `ERC20Confidential` / `ERC20ConfidentialUpgradeable`       | Add a confidential balance layer to a token that keeps its public ERC-20 ledger.                                |
+| `ERC20ConfidentialCoreUpgradeable`                         | Mix the confidential layer into a host that already brings its own ERC-20 + OpenZeppelin stack.                 |
+| `ERC20ConfidentialLib`                                     | The external library every confidential host links against (deploy once per chain).                             |
 
 ## Installation
 
-### Hardhat (npm/yarn/pnpm)
-
 ```bash
-npm install fhenix-confidential-contracts
-# or
-yarn add fhenix-confidential-contracts
-# or
 pnpm add fhenix-confidential-contracts
+# or: npm install fhenix-confidential-contracts / yarn add fhenix-confidential-contracts
 ```
 
-### Foundry
+For Foundry:
 
 ```bash
 forge install FhenixProtocol/fhenix-confidential-contracts
 ```
 
-### Linking `ERC20ConfidentialLib` (required)
+### Requirements
 
-The confidential FHE orchestration lives in `ERC20ConfidentialLib`, an **external library** that is
-`delegatecall`ed by the token. This is what keeps confidential tokens under the EIP-170 24KB
-bytecode limit: the heavy logic is deployed once per chain instead of being embedded in every token.
+- Solidity `^0.8.25`, EVM target `cancun` (the contracts use transient storage for reentrancy guards).
+- [`@fhenixprotocol/cofhe-contracts`](https://github.com/FhenixProtocol/cofhe-contracts) `1.0.0`.
+- Client-side encryption with `@cofhe/sdk` `0.8.x` (tests use `@cofhe/hardhat-plugin` `0.8.x`).
 
-Every contract that inherits `ERC20Confidential`, `ERC20ConfidentialUpgradeable`,
-`ERC20ConfidentialCoreUpgradeable`, or either wrapper must be linked against it at deploy time. The
-address is baked into the token's bytecode and **cannot be changed afterwards**.
+## Linking `ERC20ConfidentialLib` (required)
+
+The confidential FHE orchestration and unshield-claim bookkeeping live in `ERC20ConfidentialLib`,
+an **external library** that is `delegatecall`ed by the token. Keeping it out of the token is what
+keeps confidential tokens under the EIP-170 24 KB limit.
+
+Every contract that inherits `ERC20Confidential*` or either wrapper must be linked against it at
+deploy time. The address is baked into the token's bytecode and **cannot be changed afterwards**.
+Plain `FHERC20` / `FHERC20Upgradeable` do not use the library.
 
 ```ts
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
 
-// 1. Deploy the library once per chain (see deploy/00_deploy_confidential_lib.ts, which also
-//    forces explorer verification and records the address under deployments/<network>/).
+// 1. Deploy the library once per chain. deploy/00_deploy_confidential_lib.ts does this, forces
+//    explorer verification, and records the address under deployments/<network>/.
 const lib = await ethers.deployContract(LIB_FQN);
 await lib.waitForDeployment();
 
@@ -66,201 +75,199 @@ await upgrades.deployProxy(factory, [...args], { unsafeAllowLinkedLibraries: tru
 
 Forgetting step 2 fails at deploy time with an unresolved-link error, not silently.
 
+> Library instances deployed from a 0.x release are **not** the audited code. 1.0.0 hosts must
+> link against a library deployed from 1.0.0.
+
 ## Usage
 
-### Basic FHERC20 Token
+### A confidential token
 
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import { FHERC20 } from "fhenix-confidential-contracts/contracts/FHERC20.sol";
+import { FHE } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import { FHERC20 } from "fhenix-confidential-contracts/contracts/FHERC20/FHERC20.sol";
 
 contract MyConfidentialToken is FHERC20 {
-    constructor() FHERC20("My Confidential Token", "eMCT", 18) {
-        // Mint initial supply to deployer
-        _mint(msg.sender, 1000000 * 10**18);
-    }
+  constructor() FHERC20("My Confidential Token", "eMCT", 6, "") {
+    _mint(msg.sender, FHE.asEuint64(1_000_000 * 10 ** 6));
+  }
 }
 ```
 
-### FHERC20 with Permit
+Balances are `euint64` (at most ~1.8 × 10¹⁹ base units), so 6 decimals is the practical ceiling.
+The wrappers and `ERC20Confidential` cap their confidential decimals at 6 automatically.
+
+### Wrapping an existing ERC-20
+
+For a production deployment, use the ready-made UUPS host behind an `ERC1967Proxy`:
+
+```ts
+const impl = await(
+  await ethers.getContractFactory("FHERC20ERC20WrapperUUPS", {
+    libraries: { [LIB_FQN]: libAddress },
+  }),
+).deploy();
+
+const initData = impl.interface.encodeFunctionData("initialize", [
+  underlying, // the ERC-20 being wrapped; decimals are taken from it, capped at 6
+  "Confidential USDC",
+  "eUSDC",
+  "", // contractURI
+  multisig, // owner: holds upgrade authority, nothing else
+]);
+const proxy = await(await ethers.getContractFactory("ERC1967Proxy")).deploy(await impl.getAddress(), initData);
+```
+
+`FHERC20NativeWrapperUUPS` is the same, initialized with the chain's WETH instead of an ERC-20.
+
+The owner's only power is authorizing upgrades, and an upgrade can move everything the wrapper
+holds. **Use a multisig.** Ownership transfers in two steps (`transferOwnership`, then
+`acceptOwnership`).
+
+The wrapper lifecycle:
+
+1. **Shield.** Approve the wrapper, then `shield(to, amount)`. ERC-1363 `transferAndCall` also
+   works. Native wrappers use `shieldNative(to)` (payable) or `shieldWrappedNative(to, value)`.
+2. **Unshield.** `unshield(from, to, amount)` burns the confidential balance and records a pending
+   claim for `to`. The claim id comes from `getUserClaims(to)`.
+3. **Decrypt.** Obtain a threshold-network decryption proof for the claim's `ctHash` (via `@cofhe/sdk`).
+4. **Claim.** Anyone may call `claimUnshielded(id, decryptedAmount, proof)`. It pays `to`.
+   `claimUnshieldedBatch` settles several claims at once.
+
+If the recipient cannot accept the payout (for example, a contract with no payable fallback, or
+an address the underlying token blocks), the recipient or their operator can redirect it with
+`reassignClaim(id, newTo)`. On native wrappers they can instead settle in WETH with
+`claimUnshieldedAsWETH`. The claim keeps its id, so a proof obtained earlier stays valid.
+
+### Adding a confidential layer to an ERC-20
 
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
+import { ERC20Confidential } from "fhenix-confidential-contracts/contracts/ERC20Confidential/ERC20Confidential.sol";
 
-import { FHERC20 } from "fhenix-confidential-contracts/contracts/FHERC20.sol";
-import { FHERC20Permit } from "fhenix-confidential-contracts/contracts/FHERC20Permit.sol";
-
-contract MyPermitToken is FHERC20, FHERC20Permit {
-    constructor()
-        FHERC20("My Permit Token", "eMPT", 18)
-        FHERC20Permit("My Permit Token")
-    {
-        _mint(msg.sender, 1000000 * 10**18);
-    }
+contract MyDualToken is ERC20Confidential {
+  // 18 public decimals; the confidential layer uses 6, at a conversion rate of 10 ** 12.
+  constructor() ERC20Confidential("My Dual Token", "MDT", 18) {}
 }
 ```
 
-### Wrapping Existing ERC-20 Tokens
+Holders move value between the public ledger and the confidential one with `shield(amount)` and
+`unshield(amount)` + `claimUnshielded`. Override `_beforeConfidentialMove(from, to)` to apply
+pause or freeze policy. It runs on every confidential transfer, on `unshield`, and on issuer
+mints (`from == address(0)`).
+
+## Key concepts
+
+### Encrypted inputs
+
+User-facing entry points take an `externalEuint64` handle plus the batch `inputProof` produced by
+`@cofhe/sdk`. Contract-to-contract calls use the `sharedEuint64` overloads instead: the calling
+contract shares the handle with `FHE.shareEuint64(handle, token)`, and reads results with
+`FHE.receiveEuint64FromCall(returned, token)`.
+
+```ts
+const [encAmount, inputProof] = await client
+  .encryptInputs([Encryptable.uint64(amount)])
+  .setConsumingContract(tokenAddress)
+  .execute();
+
+await token["confidentialTransfer(address,bytes32,bytes)"](to, encAmount, inputProof);
+```
+
+On the `*AndCall` overloads, `inputProof` comes before `bytes data`.
+
+### Receivers
+
+`confidentialTransferAndCall` calls `IERC7984Receiver.onConfidentialTransferReceived` on the
+recipient. A receiver must unwrap the amount with `FHE.receiveEuint64Param(amount)` and return its
+answer as `FHE.shareEbool(result, msg.sender)`. If it returns an unshared value, the transfer
+reverts with `NotShared`; it is not treated as a rejection. A receiver that moves its own balance
+during the callback makes the transfer revert.
+
+### Operators instead of allowances
+
+Allowances would leak encrypted amounts, so ERC-7984 replaces them with time-limited operators.
+An operator can move **any** amount on the holder's behalf until `until`, and can read the
+holder's balance. Keep deadlines short.
 
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
-
-import { FHERC20Wrapper } from "fhenix-confidential-contracts/contracts/FHERC20Wrapper.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-contract MyWrappedToken is FHERC20Wrapper {
-    constructor(IERC20 underlyingToken)
-        FHERC20Wrapper(underlyingToken, "")
-    {}
-}
-
-// Usage:
-// 1. Deploy with existing ERC-20 address
-// 2. Approve the wrapper contract to spend your ERC-20 tokens
-// 3. Call wrap(recipient, amount) to mint confidential tokens
-// 4. Call unwrap(recipient, encryptedAmount) to initiate unwrapping
-// 5. Call claimUnwrapped(ctHash) after decryption completes
+token.setOperator(spender, uint48(block.timestamp + 1 hours));
 ```
 
-## Contract Architecture
+### Indicated balances
 
-Behavior lives in shared `*Core` mixins; the concrete contracts are thin hosts that only supply
-setup (constructor vs. initializer) and ERC-165 answers. The FHE orchestration sits one level
-deeper still, in the external linked `ERC20ConfidentialLib`.
+On FHERC20 tokens, `balanceOf` returns an _indicator_ rather than the real balance. It is a
+small value that changes on activity, so wallets and explorers notice movement without seeing
+amounts. `ERC20Confidential` keeps its real public `balanceOf` and publishes the indicator through
+a companion `ERC20ConfidentialIndicator` token instead. Accounts with no confidential activity
+read `0`. Integrators can detect the scheme with `balanceOfIsIndicator()` and `indicatorTick()`.
+
+## Contract architecture
+
+Behavior lives in shared `*Core` mixins. The concrete contracts are thin hosts that supply setup
+(constructor vs. initializer) and ERC-165 answers.
 
 ```
 ERC20ConfidentialLib (external, linked, delegatecall'd - deploy once per chain)
-  ▲ used by every core below
+  ▲ used by the wrapper cores and the confidential core
 
 FHERC20Core (encrypted balances, operators, indicator layer, disclosure)
-├── FHERC20                                  (constructor host)
-├── FHERC20Upgradeable                        (proxy host)
-├── FHERC20ERC20WrapperCore                   (wrap/shield/unshield/claim)
+├── FHERC20                                   (constructor host)
+├── FHERC20Upgradeable                        (initializer host)
+├── FHERC20ERC20WrapperCore                   (shield / unshield / claim)
 │   ├── FHERC20ERC20Wrapper
 │   └── FHERC20ERC20WrapperUpgradeable
-└── FHERC20NativeWrapperCore                  (native/WETH shield/unshield/claim)
+│       └── FHERC20ERC20WrapperUUPS           (deployable: Ownable2Step + UUPS)
+└── FHERC20NativeWrapperCore                  (native / WETH shield / unshield / claim)
     ├── FHERC20NativeWrapper
     └── FHERC20NativeWrapperUpgradeable
+        └── FHERC20NativeWrapperUUPS          (deployable: Ownable2Step + UUPS)
 
-ERC20ConfidentialCoreUpgradeable (dual-ledger confidential layer over a host's public ERC-20;
-│   reaches the ledger through _ledgerMint / _ledgerTransfer / _ledgerBalanceOf, and gates
-│   account-initiated moves through _beforeConfidentialMove)
+ERC20ConfidentialCoreUpgradeable (confidential layer over a host's public ERC-20; reaches the
+│   ledger through _ledgerMint / _ledgerTransfer / _ledgerBalanceOf and gates moves through
+│   _beforeConfidentialMove)
 ├── ERC20Confidential                         (constructor host, OZ ERC20 ledger)
-└── ERC20ConfidentialUpgradeable              (proxy host, OZ ERC20Upgradeable ledger)
+└── ERC20ConfidentialUpgradeable              (initializer host, OZ ERC20Upgradeable ledger)
 
-Interfaces:
-├── IFHERC20 / IERC7984 / IERC7984Receiver
-├── IERC20Confidential
-├── IERC20ConfidentialCore    (confidential-only; no OZ IERC20/IERC165, so it composes
-│                              with hosts that bring their own stack)
-├── IFHERC20ERC20Wrapper / IFHERC20NativeWrapper
-└── IWETH
-
-Utilities:
-├── FHERC20Utils
-├── FHERC20Errors
-├── FHERC20WrapperClaims      (claim bookkeeping over the library's claim store)
-├── ERC20ConfidentialIndicator
-└── FHESafeMath
+Interfaces: IERC7984, IERC7984Receiver, IFHERC20, IERC20Confidential, IERC20ConfidentialCore,
+            IFHERC20ERC20Wrapper, IFHERC20NativeWrapper, IWETH
+Utilities:  FHERC20Utils, FHERC20Errors, FHERC20WrapperClaims, ERC20ConfidentialIndicator, FHESafeMath
 ```
 
-Unshield claims are keyed by a unique per-claimant id (`keccak256(to, nonce++, handle)`), not by
-the ciphertext handle: CoFHE handles are content-addressed, so two unshields with an identical
-burned-amount lineage produce the same handle, and handle-keyed claims could overwrite each other.
-Read claim ids from `getClaim` / `getUserClaims`; the handle is retained as `Claim.ctHash` to bind
-the decryption proof.
+Unshield claims are keyed by a unique per-claimant id, not by the ciphertext handle. CoFHE
+handles are content-addressed, so two identical unshields would otherwise collide. The handle is
+kept as `Claim.ctHash` to bind the decryption proof.
 
-## Key Concepts
+## Security
 
-### Indicated Balances
+- **Reentrancy.** Every function that moves a balance or pays out is `nonReentrant`. Overriders
+  that extend `claimUnshielded` through `super` must not add a second guard, or the call deadlocks.
+- **Operators** have full transfer authority and balance visibility until their deadline.
+- **Indicators** reveal activity, not amounts.
+- **Decryption proofs** are checked with `FHE.verifyDecryptResultSafe`. A bad proof reverts with
+  `InvalidDecryptionProof`.
+- **Wrapper upgrades** can move every asset the wrapper holds. The UUPS owner should be a multisig.
 
-FHERC20 tokens use an "indicator" system for backwards compatibility with existing ERC-20 infrastructure (wallets, block explorers). The `balanceOf` function returns a value between `0.0000` and `0.9999` that indicates balance changes without revealing actual amounts.
-
-This allows wallets to detect when balances change while keeping the actual amounts private.
-
-### Operators vs Allowances
-
-Traditional ERC-20 allowances are replaced with time-limited **operators** to prevent encrypted balance leakage. Unlike allowances where you approve a specific amount, operators can transfer any amount on behalf of a holder until their permission expires.
-
-```solidity
-// Set an operator (replaces approve)
-token.setOperator(spender, deadline);
-
-// Check if address is an operator
-bool isOp = token.isOperator(holder, spender);
-
-// Transfer as operator (replaces transferFrom with allowance)
-token.confidentialTransferFrom(from, to, encryptedAmount);
-```
-
-### Confidential Transfers
-
-```solidity
-// Direct encrypted transfer
-token.confidentialTransfer(to, encryptedAmount);
-
-// Operator-initiated transfer
-token.confidentialTransferFrom(from, to, encryptedAmount);
-
-// Transfer with callback to receiving contract
-token.confidentialTransferAndCall(to, encryptedAmount, data);
-```
-
-## Security Considerations
-
-### FHE-Specific Security
-
-1. **Balance Indicators Are Public**: The indicator values (0.0000-0.9999) reveal transfer activity but not amounts
-2. **Operator Model**: Operators have full transfer authority during their approval period - use short deadlines
-3. **Decryption Delays**: Unwrapping operations require waiting for FHE decryption to complete
-
-### Smart Contract Security
-
-1. **Reentrancy**: `confidentialTransferAndCall` includes callback functionality - receiving contracts should follow checks-effects-interactions
-2. **Integer Operations**: FHE operations have different overflow behavior than standard Solidity
-
-### Audit Status
-
-> **Warning**: These contracts have not been audited. A security audit is planned before v1.0.0 release.
-
-### Reporting Vulnerabilities
-
-Please report security vulnerabilities through our [Security Policy](./SECURITY.md).
-
-## Dependencies
-
-- [@openzeppelin/contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) ^5.2.0
-- [@fhenixprotocol/cofhe-contracts](https://github.com/FhenixProtocol/cofhe-contracts) 0.0.13
+Report vulnerabilities privately as described in [SECURITY.md](./SECURITY.md).
 
 ## Development
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Compile contracts
 pnpm compile
-
-# Run tests
-pnpm test
-
-# Run tests with gas reporting
-pnpm gas
-
-# Format code
+pnpm test        # full suite against the CoFHE mocks
+pnpm gas         # with gas reporting
 pnpm format
-
-# Lint
 pnpm lint
 ```
 
+Releases are managed with [Changesets](https://github.com/changesets/changesets): add one with
+`pnpm changeset` in any PR that changes published contracts.
+
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](./CONTRIBUTING.md) before submitting a Pull Request.
+Contributions are welcome. Please read the [Contributing Guide](./CONTRIBUTING.md) first.
 
 ## License
 

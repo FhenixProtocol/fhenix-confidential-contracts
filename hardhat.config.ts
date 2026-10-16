@@ -66,6 +66,10 @@ const config: HardhatUserConfig = {
       // selector, so a stale link fails at runtime rather than at link time. The 0.8.26 /
       // runs:1 / cancun pin is retained so that this version is itself reproducible. Consumers
       // link by address, so their own bytecode is unaffected by these settings.
+      //
+      // 1.0.0 changes the library again (the Consensys Diligence fixes: InvalidDecryptionProof
+      // on a rejected proof, the receiver-moved-balance check, reassignClaim). Instances deployed
+      // from 0.x builds are NOT the audited code and must not be linked by 1.0.0 hosts.
       "contracts/ERC20Confidential/ERC20ConfidentialLib.sol": {
         version: "0.8.26",
         settings: { evmVersion: "cancun", optimizer: { enabled: true, runs: 1 } },
@@ -84,7 +88,7 @@ const config: HardhatUserConfig = {
     // If the network you are looking for is not here you can add new network settings
     hardhat: {
       forking: {
-        url: `https://eth-mainnet.alchemyapi.io/v2/${providerApiKey}`,
+        url: process.env.MAINNET_RPC || `https://eth-mainnet.g.alchemy.com/v2/${providerApiKey}`,
         enabled: process.env.MAINNET_FORKING_ENABLED === "true",
       },
       mining: {
@@ -93,7 +97,9 @@ const config: HardhatUserConfig = {
       },
     },
     mainnet: {
-      url: `https://eth-mainnet.alchemyapi.io/v2/${providerApiKey}`,
+      // Override with MAINNET_RPC. The fallback needs your own ALCHEMY_API_KEY: the default
+      // shared key is IP-whitelisted (and the old eth-mainnet.alchemyapi.io host no longer resolves).
+      url: process.env.MAINNET_RPC || `https://eth-mainnet.g.alchemy.com/v2/${providerApiKey}`,
       accounts: [deployerPrivateKey],
     },
     sepolia: {
@@ -101,11 +107,15 @@ const config: HardhatUserConfig = {
       accounts: [deployerPrivateKey],
     },
     arbitrum: {
-      url: `https://arb-mainnet.g.alchemy.com/v2/${providerApiKey}`,
+      // Override with ARBITRUM_RPC. The fallback needs your own ALCHEMY_API_KEY, as above.
+      url: process.env.ARBITRUM_RPC || `https://arb-mainnet.g.alchemy.com/v2/${providerApiKey}`,
       accounts: [deployerPrivateKey],
     },
     arbitrumSepolia: {
-      url: `https://arb-sepolia.g.alchemy.com/v2/${providerApiKey}`,
+      // The default shared Alchemy key is IP-whitelisted and rejects other hosts;
+      // fall back to a keyless public RPC (override with ARBITRUM_SEPOLIA_RPC).
+      url: process.env.ARBITRUM_SEPOLIA_RPC || "https://arbitrum-sepolia-rpc.publicnode.com",
+      chainId: 421614,
       accounts: [deployerPrivateKey],
     },
   },

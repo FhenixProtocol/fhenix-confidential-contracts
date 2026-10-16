@@ -77,7 +77,7 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
         address from,
         uint256 amount,
         bytes calldata data
-    ) public virtual returns (bytes4) {
+    ) public virtual nonReentrant returns (bytes4) {
         if (underlying() != msg.sender) revert FHERC20UnauthorizedCaller(msg.sender);
 
         address to = data.length < 20 ? from : address(bytes20(data));
@@ -96,7 +96,7 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
      *
      * Returns the amount of shielded token sent.
      */
-    function shield(address to, uint256 amount) public virtual override returns (sharedEuint64) {
+    function shield(address to, uint256 amount) public virtual override nonReentrant returns (sharedEuint64) {
         SafeERC20.safeTransferFrom(IERC20(underlying()), msg.sender, address(this), amount - (amount % rate()));
 
         euint64 shieldedAmountSent = _mint(to, FHE.asEuint64(SafeCast.toUint64(amount / rate())));
@@ -135,7 +135,11 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
      * @dev Claims a pending unshield request by its unique claim id. Verifies the decryption
      * proof and transfers `decryptedAmount * rate()` underlying tokens to the requester.
      */
-    function claimUnshielded(bytes32 id, uint64 decryptedAmount, bytes memory decryptionProof) public virtual {
+    function claimUnshielded(
+        bytes32 id,
+        uint64 decryptedAmount,
+        bytes memory decryptionProof
+    ) public virtual nonReentrant {
         ERC20ConfidentialLib.Claim memory claim = _handleClaim(id, decryptedAmount, decryptionProof);
         SafeERC20.safeTransfer(IERC20(underlying()), claim.to, uint256(claim.decryptedAmount) * rate());
         emit ClaimedUnshielded(claim.to, id, FHE.wrapEuint64(claim.ctHash), claim.decryptedAmount);
@@ -148,7 +152,7 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
         bytes32[] memory ids,
         uint64[] memory decryptedAmounts,
         bytes[] memory decryptionProofs
-    ) public virtual {
+    ) public virtual nonReentrant {
         ERC20ConfidentialLib.Claim[] memory claims = _handleClaimBatch(ids, decryptedAmounts, decryptionProofs);
 
         for (uint256 i = 0; i < claims.length; i++) {
@@ -208,6 +212,11 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
             _checkConfidentialTotalSupply();
         }
         return super._update(from, to, amount);
+    }
+
+    /// @inheritdoc FHERC20WrapperClaims
+    function _isClaimOperator(address holder, address spender) internal view virtual override returns (bool) {
+        return isOperator(holder, spender);
     }
 
     /// @dev Shared internal logic for both unshield overloads.

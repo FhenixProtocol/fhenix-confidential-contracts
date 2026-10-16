@@ -7,7 +7,7 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { IFHERC20, IERC7984 } from "../interfaces/IFHERC20.sol";
 import { FHESafeMath } from "../utils/FHESafeMath.sol";
 import { FHERC20Utils } from "./utils/FHERC20Utils.sol";
-import { FHERC20InvalidReceiver, FHERC20InvalidSender, FHERC20UnauthorizedSpender, FHERC20ZeroBalance, FHERC20UnauthorizedUseOfEncryptedAmount, FHERC20IncompatibleFunction } from "./utils/FHERC20Errors.sol";
+import { FHERC20InvalidReceiver, FHERC20InvalidSender, FHERC20UnauthorizedSpender, FHERC20ZeroBalance, FHERC20UnauthorizedUseOfEncryptedAmount, FHERC20IncompatibleFunction, FHERC20ReceiverMovedBalance, InvalidDecryptionProof } from "./utils/FHERC20Errors.sol";
 
 /**
  * @dev Shared core of the {IFHERC20} reference implementation — the single home of all FHERC20
@@ -311,7 +311,9 @@ abstract contract FHERC20Core is IFHERC20, ReentrancyGuardTransient {
         uint64 cleartextAmount,
         bytes calldata decryptionProof
     ) public virtual {
-        FHE.verifyDecryptResult(encryptedAmount, cleartextAmount, decryptionProof);
+        if (!FHE.verifyDecryptResultSafe(encryptedAmount, cleartextAmount, decryptionProof)) {
+            revert InvalidDecryptionProof();
+        }
         emit AmountDisclosed(encryptedAmount, cleartextAmount);
     }
 
@@ -340,6 +342,12 @@ abstract contract FHERC20Core is IFHERC20, ReentrancyGuardTransient {
         return _update(from, to, amount);
     }
 
+    /**
+     * @dev Credits `to`, asks `to` whether it accepts, and refunds `from` if it does not.
+     *
+     * Checks the ctHash of the receiver before and after the call to ensure it did not move its own balance.
+     * This is a redundant safety check - reentrancy guards on token transfers will revert if the receiver attempts to move its own balance.
+     */
     function _transferAndCall(
         address from,
         address to,
@@ -348,7 +356,13 @@ abstract contract FHERC20Core is IFHERC20, ReentrancyGuardTransient {
     ) internal returns (euint64 transferred) {
         euint64 sent = _transfer(from, to, amount);
 
+        bytes32 balanceBefore = FHE.unwrap(_getFHERC20Storage()._balances[to]);
+
         ebool success = FHERC20Utils.checkOnTransferReceived(msg.sender, from, to, sent, data);
+
+        if (FHE.unwrap(_getFHERC20Storage()._balances[to]) != balanceBefore) {
+            revert FHERC20ReceiverMovedBalance(to);
+        }
 
         euint64 refund = _update(to, from, FHE.select(success, FHE.asEuint64(0), sent));
         transferred = FHE.sub(sent, refund);
@@ -366,26 +380,25 @@ abstract contract FHERC20Core is IFHERC20, ReentrancyGuardTransient {
 
     function _update(address from, address to, euint64 amount) internal virtual returns (euint64 transferred) {
         FHERC20Storage storage $ = _getFHERC20Storage();
+        ebool success;
         euint64 ptr;
 
         if (from == address(0)) {
-            ebool success;
             (success, ptr) = FHESafeMath.tryIncrease($._totalSupply, amount);
             FHE.allowThis(ptr);
             $._totalSupply = ptr;
             $._indicatedTotalSupply = _incrementIndicator($._indicatedTotalSupply);
-            transferred = FHE.select(success, amount, FHE.asEuint64(0));
         } else {
             euint64 fromBalance = $._balances[from];
             if (!FHE.isInitialized(fromBalance)) revert FHERC20ZeroBalance(from);
-            // `trySpend` returns the amount actually debited, so the credit leg below needs no
-            // second `FHE.select` on `amount`.
-            (, ptr, transferred) = FHESafeMath.trySpend(fromBalance, amount);
+            (success, ptr) = FHESafeMath.tryDecrease(fromBalance, amount);
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);
             $._balances[from] = ptr;
             $._indicatedBalances[from] = _decrementIndicator($._indicatedBalances[from]);
         }
+
+        transferred = FHE.select(success, amount, FHE.asEuint64(0));
 
         if (to == address(0)) {
             ptr = FHE.sub($._totalSupply, transferred);

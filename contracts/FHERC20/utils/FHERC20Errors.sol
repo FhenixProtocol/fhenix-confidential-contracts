@@ -25,5 +25,11 @@ error FHERC20UnauthorizedUseOfEncryptedAmount(euint64 amount, address user);
 /// @dev The given caller `caller` is not authorized for the current operation.
 error FHERC20UnauthorizedCaller(address caller);
 
+/// @dev The receiver `receiver` moved its own balance during its transfer callback.
+error FHERC20ReceiverMovedBalance(address receiver);
+
+/// @dev The supplied threshold-decryption proof does not bind the cleartext to the ciphertext.
+error InvalidDecryptionProof();
+
 /// @dev Reverts when a cleartext ERC-20 function is called on a confidential token.
 error FHERC20IncompatibleFunction();

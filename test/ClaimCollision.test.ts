@@ -16,7 +16,7 @@ import { ConfidentialHarness } from "../typechain-types";
 // keeping the handle only as `ctHash` for the decrypt-proof binding. Colliding handles
 // now produce distinct claim records that settle independently to their true owners.
 //
-// This exercises the Core + ERC20ConfidentialLib delegatecall path that FUSDJmi uses
+// This exercises the Core + ERC20ConfidentialLib delegatecall path that production hosts use
 // (via ConfidentialHarness).
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
 

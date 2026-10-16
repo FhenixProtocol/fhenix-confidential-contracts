@@ -111,9 +111,11 @@ library ERC20ConfidentialLib {
     event ObserverSet(address indexed observer);
     event ObserverPastGranted(address indexed observer, uint256 count);
 
+    error ERC20ConfidentialUnauthorizedUseOfEncryptedAmount(euint64 value, address user);
     error ERC20ConfidentialUnauthorizedSpender(address holder, address spender);
     error ConfidentialInvalidSender(address sender);
     error ConfidentialInvalidReceiver(address receiver);
+    error ConfidentialReceiverMovedBalance(address receiver);
     error AmountTooSmallForConfidentialPrecision();
     /// @notice Thrown when {grantObserverPast} runs with no observer configured.
     error NoObserverSet();
@@ -126,21 +128,20 @@ library ERC20ConfidentialLib {
     /// {ConfidentialTransfer} log. Returns the actually-moved (clamped) amount.
     function update(address from, address to, euint64 amount) public returns (euint64 transferred) {
         ERC20ConfidentialStorage storage $ = _getERC20ConfidentialStorage();
+        ebool success;
         euint64 ptr;
         address obs = $._observer; // compliance observer (0 = none); forward-grant below
 
         if (from != address(0)) {
             euint64 fromBalance = $._confidentialBalances[from];
-            // `trySpend` hands back the amount it actually debited, so the credit leg below reads
-            // it straight off the debit instead of re-deriving it with a second `FHE.select`.
-            (, ptr, transferred) = FHESafeMath.trySpend(fromBalance, amount);
+            (success, ptr) = FHESafeMath.tryDecrease(fromBalance, amount);
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);
             if (obs != address(0)) FHE.allow(ptr, obs);
             $._confidentialBalances[from] = ptr;
-        } else {
-            transferred = amount; // mint: nothing to debit, so the full amount lands
         }
+
+        transferred = from != address(0) ? FHE.select(success, amount, FHE.asEuint64(0)) : amount;
 
         if (to != address(0)) {
             ptr = FHE.add($._confidentialBalances[to], transferred);
@@ -249,7 +250,6 @@ library ERC20ConfidentialLib {
         } catch {
             return;
         }
-
         ERC20ConfidentialStorage storage $ = _getERC20ConfidentialStorage();
         uint256 rate = $._conversionRate;
         uint256 amountToShield = amount - (amount % rate);
@@ -341,11 +341,7 @@ library ERC20ConfidentialLib {
         return FHE.shareEuint64(transferred, msg.sender);
     }
 
-    function confTransferFrom(
-        address from,
-        address to,
-        sharedEuint64 sharedValue
-    ) public returns (sharedEuint64) {
+    function confTransferFrom(address from, address to, sharedEuint64 sharedValue) public returns (sharedEuint64) {
         euint64 value = FHE.receiveEuint64Param(sharedValue);
         if (!_isOperator(from, msg.sender)) revert ERC20ConfidentialUnauthorizedSpender(from, msg.sender);
         return FHE.shareEuint64(_move(from, to, value), msg.sender);
@@ -418,6 +414,12 @@ library ERC20ConfidentialLib {
         return update(from, to, value);
     }
 
+    /**
+     * @dev Credits `to`, asks `to` whether it accepts, and refunds `from` if it does not.
+     *
+     * Checks the ctHash of the receiver before and after the call to ensure it did not move its own balance.
+     * This is a redundant safety check - reentrancy guards on token transfers will revert if the receiver attempts to move its own balance.
+     */
     function _moveAndCall(
         address from,
         address to,
@@ -425,7 +427,15 @@ library ERC20ConfidentialLib {
         bytes calldata data
     ) internal returns (euint64 transferred) {
         euint64 sent = _move(from, to, amount);
+
+        bytes32 balanceBefore = FHE.unwrap(_getERC20ConfidentialStorage()._confidentialBalances[to]);
+
         ebool success = FHERC20Utils.checkOnTransferReceived(msg.sender, from, to, sent, data);
+
+        if (FHE.unwrap(_getERC20ConfidentialStorage()._confidentialBalances[to]) != balanceBefore) {
+            revert ConfidentialReceiverMovedBalance(to);
+        }
+
         euint64 refund = update(to, from, FHE.select(success, FHE.asEuint64(0), sent));
         transferred = FHE.sub(sent, refund);
     }
@@ -463,6 +473,7 @@ library ERC20ConfidentialLib {
 
     error ClaimNotFound();
     error AlreadyClaimed();
+    error InvalidDecryptionProof();
 
     function _claimStore() private pure returns (ClaimStorage storage $) {
         assembly {
@@ -496,12 +507,30 @@ library ERC20ConfidentialLib {
 
         // The proof binds `decryptedAmount` to the burned handle (`ctHash`), which is fixed at
         // createClaim time — never to the caller-supplied `id`.
-        FHE.verifyDecryptResult(FHE.wrapEuint64(claim.ctHash), decryptedAmount, decryptionProof);
+        if (!FHE.verifyDecryptResultSafe(FHE.wrapEuint64(claim.ctHash), decryptedAmount, decryptionProof)) {
+            revert InvalidDecryptionProof();
+        }
 
         claim.decryptedAmount = decryptedAmount;
         claim.claimed = true;
         $._claims[id] = claim;
         $._userClaims[claim.to].remove(id);
+    }
+
+    /// @dev Re-points an UNSETTLED claim at `newTo`, keeping its id, and moves it between the
+    /// two `_userClaims` sets. Pure bookkeeping: authorization is the host's job (see
+    /// {FHERC20WrapperClaims-reassignClaim}), which is the only caller that knows the operator
+    /// rules.
+    function reassignClaim(bytes32 id, address newTo) public returns (Claim memory claim) {
+        ClaimStorage storage $ = _claimStore();
+        claim = $._claims[id];
+        if (claim.to == address(0)) revert ClaimNotFound();
+        if (claim.claimed) revert AlreadyClaimed();
+
+        $._userClaims[claim.to].remove(id);
+        claim.to = newTo;
+        $._claims[id] = claim;
+        $._userClaims[newTo].add(id);
     }
 
     function getClaim(bytes32 id) public view returns (Claim memory) {

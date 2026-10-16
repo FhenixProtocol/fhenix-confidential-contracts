@@ -456,4 +456,108 @@ describe("FHERC20ERC20Wrapper", function () {
       ).to.be.revertedWithCustomError(eBTC, "FHERC20UnauthorizedCaller");
     });
   });
+
+  // Consensys Diligence 5.13 — `claim.to` is fixed at burn time and settlement pays it
+  // unconditionally. On the ERC-20 side a plain transfer to an EOA will not revert, but a
+  // blocklisting or pausable underlying reintroduces the same permanent lock, so the recipient
+  // needs a way to re-point an unsettled claim.
+  describe("claim reassignment (Diligence 5.13)", function () {
+    async function setupPendingClaimFixture() {
+      const fixture = await setupFixture();
+      const { eBTC, wBTC, bob, alice } = fixture;
+
+      const shieldValue = 100_000_000n; // 1 wBTC
+      await wBTC.mint(bob.address, shieldValue);
+      await wBTC.connect(bob).approve(eBTC.target, shieldValue);
+      await eBTC.connect(bob).shield(bob.address, shieldValue);
+
+      const unshieldConfidentialValue = 1_000_000n;
+      const tx = await eBTC
+        .connect(bob)
+        ["unshield(address,address,uint64)"](bob.address, alice.address, unshieldConfidentialValue);
+      const { ctHash, claimId } = await getUnshieldRequest(tx, eBTC, alice.address);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await fixture.bobClient.decryptForTx(ctHash).withoutACP().execute();
+
+      return { ...fixture, claimId, decryption, unshieldConfidentialValue };
+    }
+
+    it("should let the recipient re-point an unsettled claim, and pay the new recipient", async function () {
+      const { eBTC, wBTC, alice, eve, claimId, decryption, unshieldConfidentialValue } =
+        await setupPendingClaimFixture();
+
+      await expect(eBTC.connect(alice).reassignClaim(claimId, eve.address))
+        .to.emit(eBTC, "ClaimReassigned")
+        .withArgs(claimId, alice.address, eve.address);
+
+      // The id survives, so a proof taken before the reassignment still settles the claim.
+      const claim = await eBTC.getClaim(claimId);
+      expect(claim.id).to.equal(claimId);
+      expect(claim.to).to.equal(eve.address);
+      expect((await eBTC.getUserClaims(alice.address)).length).to.equal(0);
+      expect((await eBTC.getUserClaims(eve.address)).length).to.equal(1);
+
+      await eBTC.claimUnshielded(claimId, decryption.decryptedValue, decryption.signature);
+      expect(await wBTC.balanceOf(eve.address)).to.equal(unshieldConfidentialValue * conversionRate);
+      expect(await wBTC.balanceOf(alice.address)).to.equal(0n);
+    });
+
+    it("should let an operator of the recipient reassign", async function () {
+      const { eBTC, alice, bob, eve, claimId } = await setupPendingClaimFixture();
+
+      const until = (await ethers.provider.getBlock("latest"))!.timestamp + 3600;
+      await eBTC.connect(alice).setOperator(bob.address, until);
+
+      await expect(eBTC.connect(bob).reassignClaim(claimId, eve.address))
+        .to.emit(eBTC, "ClaimReassigned")
+        .withArgs(claimId, alice.address, eve.address);
+    });
+
+    it("should reject reassignment by a non-recipient", async function () {
+      const { eBTC, bob, eve, claimId } = await setupPendingClaimFixture();
+
+      // Not even `from` — the burn source — may redirect a claim: `from` is often paying `to`,
+      // so a from-side redirect would be a theft vector worse than the stranding it fixes.
+      await expect(eBTC.connect(bob).reassignClaim(claimId, bob.address)).to.be.revertedWithCustomError(
+        eBTC,
+        "FHERC20UnauthorizedSpender",
+      );
+      await expect(eBTC.connect(eve).reassignClaim(claimId, eve.address)).to.be.revertedWithCustomError(
+        eBTC,
+        "FHERC20UnauthorizedSpender",
+      );
+    });
+
+    it("should reject reassignment to the zero address", async function () {
+      const { eBTC, alice, claimId } = await setupPendingClaimFixture();
+
+      await expect(eBTC.connect(alice).reassignClaim(claimId, ZeroAddress)).to.be.revertedWithCustomError(
+        eBTC,
+        "FHERC20InvalidReceiver",
+      );
+    });
+
+    it("should reject reassignment of an unknown claim", async function () {
+      const { eBTC, bob } = await setupFixture();
+
+      await expect(eBTC.connect(bob).reassignClaim(ethers.ZeroHash, bob.address)).to.be.revertedWithCustomError(
+        eBTC,
+        "ClaimNotFound",
+      );
+    });
+
+    it("should reject reassignment of an already-settled claim", async function () {
+      const { eBTC, alice, eve, claimId, decryption } = await setupPendingClaimFixture();
+
+      await eBTC.claimUnshielded(claimId, decryption.decryptedValue, decryption.signature);
+
+      await expect(eBTC.connect(alice).reassignClaim(claimId, eve.address)).to.be.revertedWithCustomError(
+        eBTC,
+        "AlreadyClaimed",
+      );
+    });
+  });
 });

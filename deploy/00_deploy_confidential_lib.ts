@@ -22,8 +22,10 @@ const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20Confi
  *   ETHERSCAN_MAINNET_API_KEY=... npx hardhat deploy --network <network> --tags ERC20ConfidentialLib
  *
  * NOTE: the library's compiler settings are pinned in hardhat.config.ts (0.8.26, optimizer
- * runs:1) so this artifact reproduces the bytecode of the library instances already live on
- * chain. Don't retune those settings without redeploying and re-verifying.
+ * runs:1) so this artifact is reproducible for explorer verification. Don't retune those
+ * settings without redeploying and re-verifying. The 1.0.0 (audited) library source differs
+ * from every 0.x build, so library instances deployed from 0.x must not be reused: deploy a
+ * fresh instance per chain for 1.0.0 hosts.
  *
  * How a token links against it (the address is baked into the token's BYTECODE at deploy
  * time - it is not a constructor argument and cannot change afterwards):

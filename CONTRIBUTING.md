@@ -113,7 +113,7 @@ Types:
 Examples:
 ```
 feat(FHERC20): add batch transfer functionality
-fix(FHERC20Permit): correct nonce validation logic
+fix(FHERC20NativeWrapper): correct claim settlement logic
 docs(README): update installation instructions
 ```
 
@@ -122,8 +122,9 @@ docs(README): update installation instructions
 1. **Create a feature branch** from `master`
 2. **Keep changes focused** - one feature/fix per PR
 3. **Update documentation** as needed
-4. **Update CHANGELOG.md** for user-facing changes
-5. **Ensure CI passes** before requesting review
+4. **Add a changeset** (`pnpm changeset`) for any change to published contracts. `CHANGELOG.md` is generated from changesets, so don't edit it by hand
+5. **Flag audited code**: from 1.0.0 the contracts under `contracts/` (other than `contracts/test/`) are the audited revision. Say so in the PR description when you change them, so the change gets a security review
+6. **Ensure CI passes** before requesting review
 
 PR Title Format:
 ```
@@ -145,11 +146,13 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features (backwards compatible)
 - **PATCH**: Bug fixes (backwards compatible)
 
-### Pre-release Versions
+### Releases
 
-- `X.Y.Z-alpha.N`: Early development
-- `X.Y.Z-beta.N`: Feature complete, testing
-- `X.Y.Z-rc.N`: Release candidate
+Releases are cut with [Changesets](https://github.com/changesets/changesets):
+
+- Every merge to `master` publishes a snapshot to the `beta` npm tag.
+- Merged changesets accumulate in a **Version Packages** pull request. Merging that PR publishes
+  the stable release to `latest` and tags it.
 
 ## License
 

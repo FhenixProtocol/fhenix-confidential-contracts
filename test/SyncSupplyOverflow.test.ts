@@ -12,7 +12,7 @@ import { ConfidentialHarness } from "../typechain-types";
 // funds.
 //
 // The fix SATURATES the plaintext at type(uint64).max instead of reverting. These cases exercise
-// the real Core + ERC20ConfidentialLib delegatecall path FUSDJmi uses (via ConfidentialHarness):
+// the real Core + ERC20ConfidentialLib delegatecall path every confidential host uses (via ConfidentialHarness):
 // each is RED before the fix (SafeCastOverflowedUintDowncast) and GREEN after.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
 const U64_MAX = 2n ** 64n - 1n;

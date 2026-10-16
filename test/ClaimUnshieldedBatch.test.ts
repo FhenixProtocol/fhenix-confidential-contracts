@@ -3,7 +3,7 @@ import hre, { ethers } from "hardhat";
 import { ConfidentialHarness } from "../typechain-types";
 
 // Exercises the batch unshield-claim added to ERC20ConfidentialCoreUpgradeable, over the
-// Core + ERC20ConfidentialLib delegatecall path (the same path FUSDJmi/FhenixToken use).
+// Core + ERC20ConfidentialLib delegatecall path (the same path production hosts use).
 // The batch is a length-checked loop over the single-claim library function, so a passing
 // batch confirms N pending claims settle atomically in one transaction.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";

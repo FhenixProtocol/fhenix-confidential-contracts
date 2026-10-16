@@ -3,6 +3,7 @@ pragma solidity ^0.8.25;
 
 import { FHE, euint64, externalEuint64, sharedEuint64 } from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import { IERC20ConfidentialCore } from "../interfaces/IERC20ConfidentialCore.sol";
+import { IERC7984 } from "../interfaces/IERC7984.sol";
 import { ERC20ConfidentialIndicator } from "./ERC20ConfidentialIndicator.sol";
 import { ERC20ConfidentialLib } from "./ERC20ConfidentialLib.sol";
 import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -46,12 +47,15 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
         }
     }
 
+    error ERC20ConfidentialUnauthorizedUseOfEncryptedAmount(euint64 value, address user);
     error ERC20ConfidentialUnauthorizedSpender(address holder, address spender);
     error AmountTooSmallForConfidentialPrecision();
     error ConfidentialInvalidSender(address sender);
     error ConfidentialInvalidReceiver(address receiver);
+    error ConfidentialReceiverMovedBalance(address receiver);
     error NotSelf();
     error ClaimBatchLengthMismatch();
+    error InvalidDecryptionProof();
 
     // =========================================================================
     //  Ledger hooks — implemented by the host (its public ERC-20 ledger)
@@ -164,9 +168,11 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
         return ERC20ConfidentialLib.isOperator(holder, spender);
     }
 
-    /// @dev The confidential interface id. The host's `supportsInterface` should OR this in.
+    /// @dev The confidential interface ids the host's `supportsInterface` should OR in.
+    ///
+    /// Covers ERC-7984 as well as the confidential-only core
     function _confidentialSupportsInterface(bytes4 interfaceId) internal pure returns (bool) {
-        return interfaceId == type(IERC20ConfidentialCore).interfaceId;
+        return interfaceId == type(IERC20ConfidentialCore).interfaceId || interfaceId == type(IERC7984).interfaceId;
     }
 
     // =========================================================================
@@ -177,10 +183,10 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
     // Ledger ops reach back through the self-only `__ledger` bridge below. The guard
     // hook stays here so the host's override is invoked.
 
-    // No reentrancy guard: shield's only external call is the self-call to `__ledger`
-    // (→ the host's public `_transfer`), which does not hand control to untrusted code,
-    // and it moves no confidential balance that a callback could race.
-    function shield(uint256 amount) public virtual {
+    // `nonReentrant` even though shield's only external call is the self-call to `__ledger`
+    // (→ the host's public `_transfer`), which does not hand control to untrusted code and moves
+    // no confidential balance a callback could race.
+    function shield(uint256 amount) public virtual nonReentrant {
         ERC20ConfidentialLib.shield(amount);
     }
 
@@ -194,21 +200,31 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
         return FHE.shareEuint64(ERC20ConfidentialLib.unshieldChecked(sharedAmount), msg.sender);
     }
 
-    // No reentrancy guard: the only external call is the self-call to `__ledger`
-    // (→ the host's public `_transfer`), which hands control to no untrusted code;
-    // replay is already prevented by the claim's `claimed` flag in `handleClaim`.
+    // `nonReentrant` even though the only external call is the self-call to `__ledger`
+    // (→ the host's public `_transfer`), which hands control to no untrusted code, and replay is
+    // already prevented by the claim's `claimed` flag in `handleClaim`. Both of those remain true;
+    // the guard is here so the safety of this path stops depending on them.
+    //
+    // Overriders must NOT re-apply `nonReentrant` — an override that extends this via `super`
+    // with a guard on both sides of that dispatch would deadlock.
+    //
     // `id` is the unique claim id from {getClaim}/{getUserClaims} (NOT the ciphertext handle).
-    function claimUnshielded(bytes32 id, uint64 decryptedAmount, bytes calldata decryptionProof) public virtual {
+    function claimUnshielded(
+        bytes32 id,
+        uint64 decryptedAmount,
+        bytes calldata decryptionProof
+    ) public virtual nonReentrant {
         ERC20ConfidentialLib.claimUnshielded(id, decryptedAmount, decryptionProof);
     }
 
-    // No reentrancy guard: same rationale as {claimUnshielded}. Each `ids[i]` is the unique
-    // claim id from {getClaim}/{getUserClaims} (NOT the ciphertext handle).
+    // `nonReentrant` for the same reason as {claimUnshielded}, and with the same constraint on
+    // overriders. Each `ids[i]` is the unique claim id from {getClaim}/{getUserClaims} (NOT the
+    // ciphertext handle).
     function claimUnshieldedBatch(
         bytes32[] calldata ids,
         uint64[] calldata decryptedAmounts,
         bytes[] calldata decryptionProofs
-    ) public virtual {
+    ) public virtual nonReentrant {
         if (ids.length != decryptedAmounts.length || ids.length != decryptionProofs.length) {
             revert ClaimBatchLengthMismatch();
         }
@@ -253,9 +269,16 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
     // Thin wrappers — the full orchestration lives in ERC20ConfidentialLib (delegatecall'd) so its
     // code isn't embedded in the host token. msg.sender/this are preserved under delegatecall.
 
-    /// @dev Hook invoked before every account-initiated confidential balance move
-    /// (transfers + unshield). Default no-op; hosts override to enforce policy
-    /// (e.g. freeze/pause). Issuer mint/burn deliberately do NOT call this.
+    /// @dev Hook invoked before every confidential balance move: the transfer overloads,
+    /// `unshield`, and the issuer `_confidentialMint`. Default no-op; hosts override to enforce
+    /// policy (e.g. freeze/pause).
+    ///
+    /// `shield` and `claimUnshielded` are the two paths that do NOT call this, and deliberately so:
+    /// both reach the host's public ledger via `_ledgerTransfer`, so a host's public transfer hook
+    /// already gates them. `_confidentialMint` used to be exempt on the same reasoning, but its
+    /// ledger leg is `_ledgerMint`, and a public-ledger base is not obliged to offer a mint hook,
+    /// so on a freeze- or pause-bearing host whose base has none, nothing gated it. It now calls
+    /// this hook directly (Diligence 5.33).
     function _beforeConfidentialMove(address from, address to) internal virtual {}
 
     function confidentialTransfer(
@@ -346,7 +369,13 @@ abstract contract ERC20ConfidentialCoreUpgradeable is IERC20ConfidentialCore, Re
     //  Confidential Mint (for inheriting contracts)
     // =========================================================================
 
+    /// @dev Issuer mint of confidential balance, for inheriting contracts.
+    ///
+    /// `from` is `address(0)`: there is no payer, and a zero `from` is already a documented no-op
+    /// for a host's freeze check, so the hook resolves to the pause check plus a freeze check on
+    /// the recipient — nothing a mint should be exempt from.
     function _confidentialMint(address to, uint64 amount) internal virtual {
+        _beforeConfidentialMove(address(0), to);
         ERC20ConfidentialLib.confidentialMint(to, amount);
     }
 

@@ -22,6 +22,10 @@ interface IFHERC20NativeWrapper {
     /// @dev Emitted when an unshield request is created.
     event Unshielded(address indexed to, euint64 indexed amount);
 
+    /// @dev Emitted when a claim is settled in WETH instead of native value, alongside the
+    /// regular {ClaimedUnshielded}.
+    event ClaimedUnshieldedAsWETH(address indexed to, bytes32 indexed unshieldRequestId, uint256 wethAmount);
+
     /// @dev Emitted when an unshield request is claimed (native tokens transferred).
     event ClaimedUnshielded(
         address indexed to,
@@ -69,6 +73,24 @@ interface IFHERC20NativeWrapper {
      * `unshieldAmountCleartext * rate()` native tokens to the requester.
      */
     function claimUnshielded(
+        bytes32 unshieldRequestId,
+        uint64 unshieldAmountCleartext,
+        bytes calldata decryptionProof
+    ) external;
+
+    /**
+     * @dev Settles a pending unshield request in WETH rather than native value: deposits
+     * `unshieldAmountCleartext * rate()` into the wrapper's WETH contract and transfers it to the
+     * recipient recorded on the claim.
+     *
+     * Unlike {claimUnshielded} this is NOT permissionless — only the claim's recipient, or an
+     * operator acting for them, may take this route. The recipient is the one who chose to unwind
+     * into native value, so nobody else gets to hand them WETH instead.
+     *
+     * This is the escape hatch for a recipient that cannot accept native value (a contract with no
+     * payable fallback), whose claim would otherwise be unsettleable forever.
+     */
+    function claimUnshieldedAsWETH(
         bytes32 unshieldRequestId,
         uint64 unshieldAmountCleartext,
         bytes calldata decryptionProof

@@ -16,7 +16,7 @@ import { prepExpectFHERC20BalancesChange, expectFHERC20BalancesChange } from "./
 // its untrusted callback, then (on `false`) runs a saturating refund. Without a
 // reentrancy guard a malicious recipient can drain its just-credited balance during
 // the callback — via `confidentialTransfer` (base) or `unshield` (wrapper) — then
-// return `false`; the refund's `trySpend` finds a zero balance and no-ops, so the
+// return `false`; the refund's `tryDecrease` finds a zero balance and no-ops, so the
 // sender is debited and the attacker keeps the funds.
 //
 // The sibling ERC20ConfidentialCoreUpgradeable already guards this (see

@@ -488,4 +488,182 @@ describe("FHERC20NativeWrapper", function () {
       ).to.be.revertedWithCustomError(eETH, "AlreadyClaimed");
     });
   });
+
+  // Consensys Diligence 5.13 — an unshield to a recipient that cannot accept native value used to
+  // strand the burned value in the wrapper forever: `claim.to` is fixed at burn time, settlement
+  // pays it unconditionally, and there was no reassignment, cancel or expiry.
+  describe("stranded claims (Diligence 5.13)", function () {
+    async function setupStrandedFixture() {
+      const fixture = await setupFixture();
+      const { eETH, bob } = fixture;
+
+      const receiver = await ethers.deployContract("NonPayableReceiver");
+      await receiver.waitForDeployment();
+
+      await eETH.connect(bob).shieldNative(bob, { value: ethers.parseEther("10") });
+
+      const unshieldConfidentialValue = 1_000_000n;
+      const tx = await eETH
+        .connect(bob)
+        ["unshield(address,address,uint64)"](bob.address, receiver.target as string, unshieldConfidentialValue);
+      const { ctHash, claimId } = await getUnshieldRequest(tx, eETH, receiver.target as string);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+
+      const decryption = await fixture.bobClient.decryptForTx(ctHash).withoutACP().execute();
+
+      return { ...fixture, receiver, claimId, decryption, unshieldConfidentialValue };
+    }
+
+    it("should revert the native claim when the recipient cannot accept ETH", async function () {
+      const { eETH, bob, claimId, decryption } = await setupStrandedFixture();
+
+      await expect(
+        eETH.connect(bob).claimUnshielded(claimId, decryption.decryptedValue, decryption.signature),
+      ).to.be.revertedWithCustomError(eETH, "NativeTransferFailed");
+    });
+
+    it("should leave the claim pending after a failed native claim", async function () {
+      const { eETH, bob, receiver, claimId, decryption } = await setupStrandedFixture();
+
+      await expect(eETH.connect(bob).claimUnshielded(claimId, decryption.decryptedValue, decryption.signature)).to.be
+        .reverted;
+
+      // The whole tx reverted, so the claim was never consumed — it is still pending, and still
+      // unsettleable by the native route. That is precisely the permanent lock 5.13 describes.
+      const claim = await eETH.getClaim(claimId);
+      expect(claim.claimed).to.equal(false);
+      expect((await eETH.getUserClaims(receiver.target as string)).length).to.equal(1);
+    });
+
+    it("should let the recipient settle in WETH instead", async function () {
+      const { eETH, wETH, receiver, claimId, decryption, unshieldConfidentialValue } = await setupStrandedFixture();
+
+      const expectedWeth = unshieldConfidentialValue * conversionRate;
+      const data = eETH.interface.encodeFunctionData("claimUnshieldedAsWETH", [
+        claimId,
+        decryption.decryptedValue,
+        decryption.signature,
+      ]);
+
+      await expect(receiver.execute(eETH.target as string, data))
+        .to.emit(eETH, "ClaimedUnshieldedAsWETH")
+        .and.to.emit(eETH, "ClaimedUnshielded");
+
+      expect(await wETH.balanceOf(receiver.target as string)).to.equal(expectedWeth);
+      expect((await eETH.getClaim(claimId)).claimed).to.equal(true);
+      expect((await eETH.getUserClaims(receiver.target as string)).length).to.equal(0);
+    });
+
+    it("should not let a third party force WETH settlement on a recipient", async function () {
+      const { eETH, bob, receiver, claimId, decryption } = await setupStrandedFixture();
+
+      // Permissionless on the ETH route, recipient-only on the WETH route: nobody else gets to
+      // decide a claimant receives WETH rather than the native value they asked for.
+      await expect(
+        eETH.connect(bob).claimUnshieldedAsWETH(claimId, decryption.decryptedValue, decryption.signature),
+      ).to.be.revertedWithCustomError(eETH, "FHERC20UnauthorizedSpender");
+
+      // Still pending and still pointed at the original recipient.
+      const claim = await eETH.getClaim(claimId);
+      expect(claim.claimed).to.equal(false);
+      expect(claim.to).to.equal(receiver.target);
+    });
+
+    it("should revert claimUnshieldedAsWETH for an unknown claim", async function () {
+      const { eETH, bob } = await setupFixture();
+
+      await expect(
+        eETH.connect(bob).claimUnshieldedAsWETH(ethers.ZeroHash, 0n, new Uint8Array(0)),
+      ).to.be.revertedWithCustomError(eETH, "ClaimNotFound");
+    });
+
+    it("should let the recipient reassign the claim and settle in ETH", async function () {
+      const { eETH, alice, receiver, claimId, decryption, unshieldConfidentialValue } = await setupStrandedFixture();
+
+      const data = eETH.interface.encodeFunctionData("reassignClaim", [claimId, alice.address]);
+      await expect(receiver.execute(eETH.target as string, data))
+        .to.emit(eETH, "ClaimReassigned")
+        .withArgs(claimId, receiver.target, alice.address);
+
+      // The id is unchanged, so the decryption proof taken before the reassignment still settles.
+      const claim = await eETH.getClaim(claimId);
+      expect(claim.id).to.equal(claimId);
+      expect(claim.to).to.equal(alice.address);
+      expect((await eETH.getUserClaims(receiver.target as string)).length).to.equal(0);
+      expect((await eETH.getUserClaims(alice.address)).length).to.equal(1);
+
+      const aliceBefore = await ethers.provider.getBalance(alice.address);
+      await eETH.claimUnshielded(claimId, decryption.decryptedValue, decryption.signature);
+      expect((await ethers.provider.getBalance(alice.address)) - aliceBefore).to.equal(
+        unshieldConfidentialValue * conversionRate,
+      );
+    });
+
+    it("should let an operator of the recipient reassign", async function () {
+      const { eETH, alice, bob, claimId } = await setupStrandedFixture();
+
+      // Re-point at alice first (an EOA that can set operators), then have her operator move it.
+      const receiverClaim = await eETH.getClaim(claimId);
+      const receiver = await ethers.getContractAt("NonPayableReceiver", receiverClaim.to);
+      await receiver.execute(
+        eETH.target as string,
+        eETH.interface.encodeFunctionData("reassignClaim", [claimId, alice.address]),
+      );
+
+      const until = (await ethers.provider.getBlock("latest"))!.timestamp + 3600;
+      await eETH.connect(alice).setOperator(bob.address, until);
+
+      await expect(eETH.connect(bob).reassignClaim(claimId, bob.address))
+        .to.emit(eETH, "ClaimReassigned")
+        .withArgs(claimId, alice.address, bob.address);
+    });
+
+    it("should reject reassignment by a non-recipient", async function () {
+      const { eETH, eve, claimId } = await setupStrandedFixture();
+
+      await expect(eETH.connect(eve).reassignClaim(claimId, eve.address)).to.be.revertedWithCustomError(
+        eETH,
+        "FHERC20UnauthorizedSpender",
+      );
+    });
+
+    it("should reject reassignment to the zero address", async function () {
+      const { eETH, receiver, claimId } = await setupStrandedFixture();
+
+      const data = eETH.interface.encodeFunctionData("reassignClaim", [claimId, ZeroAddress]);
+      await expect(receiver.execute(eETH.target as string, data)).to.be.revertedWithCustomError(
+        eETH,
+        "FHERC20InvalidReceiver",
+      );
+    });
+
+    it("should reject reassignment of an unknown claim", async function () {
+      const { eETH, bob } = await setupFixture();
+
+      await expect(eETH.connect(bob).reassignClaim(ethers.ZeroHash, bob.address)).to.be.revertedWithCustomError(
+        eETH,
+        "ClaimNotFound",
+      );
+    });
+
+    it("should reject reassignment of an already-settled claim", async function () {
+      const { eETH, bob, alice, bobClient } = await setupFixture();
+
+      await eETH.connect(bob).shieldNative(bob, { value: ethers.parseEther("10") });
+      const tx = await eETH.connect(bob)["unshield(address,address,uint64)"](bob.address, alice.address, 1_000_000n);
+      const { ctHash, claimId } = await getUnshieldRequest(tx, eETH, alice.address);
+
+      await hre.network.provider.send("evm_increaseTime", [11]);
+      await hre.network.provider.send("evm_mine");
+      const decryption = await bobClient.decryptForTx(ctHash).withoutACP().execute();
+      await eETH.connect(bob).claimUnshielded(claimId, decryption.decryptedValue, decryption.signature);
+
+      await expect(eETH.connect(alice).reassignClaim(claimId, bob.address)).to.be.revertedWithCustomError(
+        eETH,
+        "AlreadyClaimed",
+      );
+    });
+  });
 });

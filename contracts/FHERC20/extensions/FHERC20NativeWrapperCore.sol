@@ -77,7 +77,7 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
     receive() external payable {}
 
     /// @inheritdoc IFHERC20NativeWrapper
-    function shieldWrappedNative(address to, uint256 value) public virtual returns (sharedEuint64) {
+    function shieldWrappedNative(address to, uint256 value) public virtual nonReentrant returns (sharedEuint64) {
         if (to == address(0)) to = msg.sender;
 
         uint256 alignedValue = value - (value % rate());
@@ -95,7 +95,7 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
     }
 
     /// @inheritdoc IFHERC20NativeWrapper
-    function shieldNative(address to) public payable virtual returns (sharedEuint64) {
+    function shieldNative(address to) public payable virtual nonReentrant returns (sharedEuint64) {
         if (to == address(0)) to = msg.sender;
 
         uint256 alignedValue = msg.value - (msg.value % rate());
@@ -144,9 +144,13 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
 
     /**
      * @dev Claims a pending unshield request by its unique claim id. Verifies the decryption
-     * proof and transfers `decryptedAmount * rate()` native tokens to the requester.
+     * proof and transfers `decryptedAmount * rate()` native tokens to `claim.to`.
      */
-    function claimUnshielded(bytes32 id, uint64 decryptedAmount, bytes memory decryptionProof) public virtual {
+    function claimUnshielded(
+        bytes32 id,
+        uint64 decryptedAmount,
+        bytes memory decryptionProof
+    ) public virtual nonReentrant {
         ERC20ConfidentialLib.Claim memory claim = _handleClaim(id, decryptedAmount, decryptionProof);
 
         uint256 nativeAmount = uint256(claim.decryptedAmount) * rate();
@@ -156,6 +160,29 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
         emit ClaimedUnshielded(claim.to, id, FHE.wrapEuint64(claim.ctHash), claim.decryptedAmount);
     }
 
+    /// @inheritdoc IFHERC20NativeWrapper
+    function claimUnshieldedAsWETH(
+        bytes32 id,
+        uint64 decryptedAmount,
+        bytes memory decryptionProof
+    ) public virtual nonReentrant {
+        // Read and authorize BEFORE settling: _handleClaim consumes the claim, and the gate is on
+        // the recipient recorded at burn time.
+        address to = getClaim(id).to;
+        if (to == address(0)) revert ClaimNotFound();
+        _checkClaimRecipient(to);
+
+        ERC20ConfidentialLib.Claim memory claim = _handleClaim(id, decryptedAmount, decryptionProof);
+
+        uint256 nativeAmount = uint256(claim.decryptedAmount) * rate();
+        IWETH weth_ = _getFHERC20NativeWrapperStorage()._weth;
+        weth_.deposit{ value: nativeAmount }();
+        weth_.safeTransfer(claim.to, nativeAmount);
+
+        emit ClaimedUnshielded(claim.to, id, FHE.wrapEuint64(claim.ctHash), claim.decryptedAmount);
+        emit ClaimedUnshieldedAsWETH(claim.to, id, nativeAmount);
+    }
+
     /**
      * @dev Claims multiple pending unshield requests (by unique claim ids) in a single transaction.
      */
@@ -163,7 +190,7 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
         bytes32[] memory ids,
         uint64[] memory decryptedAmounts,
         bytes[] memory decryptionProofs
-    ) public virtual {
+    ) public virtual nonReentrant {
         ERC20ConfidentialLib.Claim[] memory claims = _handleClaimBatch(ids, decryptedAmounts, decryptionProofs);
 
         for (uint256 i = 0; i < claims.length; i++) {
@@ -224,6 +251,11 @@ abstract contract FHERC20NativeWrapperCore is FHERC20Core, IFHERC20NativeWrapper
             _checkConfidentialTotalSupply();
         }
         return super._update(from, to, amount);
+    }
+
+    /// @inheritdoc FHERC20WrapperClaims
+    function _isClaimOperator(address holder, address spender) internal view virtual override returns (bool) {
+        return isOperator(holder, spender);
     }
 
     /// @dev Shared internal logic for both unshield overloads.
