@@ -44,7 +44,7 @@ forge install FhenixProtocol/fhenix-confidential-contracts
 
 - Solidity `^0.8.25`, EVM target `cancun` (the contracts use transient storage for reentrancy guards).
 - [`@fhenixprotocol/cofhe-contracts`](https://github.com/FhenixProtocol/cofhe-contracts) `1.0.0`.
-- Client-side encryption with `@cofhe/sdk` `0.8.x` (tests use `@cofhe/hardhat-plugin` `0.8.x`).
+- Client-side encryption with `@cofhe/sdk` `1.x` (tests use `@cofhe/hardhat-plugin` `1.x`).
 
 ## Linking `ERC20ConfidentialLib` (required)
 
