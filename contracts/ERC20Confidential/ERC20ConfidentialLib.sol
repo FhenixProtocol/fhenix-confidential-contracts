@@ -211,7 +211,12 @@ library ERC20ConfidentialLib {
     ///      always was (dust-only amounts and uint64 overflow revert). `to`-addressed so
     ///      flows where `msg.sender` is NOT the account being shielded (e.g. a wrap,
     ///      where `msg.sender` is the SwapFacility) can use it via {autoShield}.
+    ///
+    ///      Reverts on `to == address(0)`: the ledger bridge reads a zero `from` as a MINT, so
+    ///      `__ledger(address(0), POOL, x)` would create unbacked public supply in the pool,
+    ///      and the matching confidential credit would land on no account.
     function shieldTo(address to, uint256 amount) public {
+        if (to == address(0)) revert ConfidentialInvalidReceiver(address(0));
         ERC20ConfidentialStorage storage $ = _getERC20ConfidentialStorage();
         uint256 rate = $._conversionRate;
         uint256 amountToShield = amount - (amount % rate);
@@ -234,6 +239,7 @@ library ERC20ConfidentialLib {
     ///      envelope, so every non-shieldable case degrades to "leave the mint public"
     ///      instead of reverting:
     ///        - `mintModes == address(0)`: feature disabled at deployment;
+    ///        - `to == address(0)`: no account to credit ({shieldTo} would revert);
     ///        - policy call reverts: fail-open to PUBLIC;
     ///        - sub-precision amount (`amount < rate`): nothing to shield — and as with
     ///          {shield}, the `amount % rate` remainder always stays public;
@@ -243,7 +249,7 @@ library ERC20ConfidentialLib {
     ///      surface beyond {shield}'s own: the ledger leg is a self-call into the host's
     ///      `_transfer` and the FHE ops call the trusted task manager.
     function autoShield(address mintModes, address to, uint256 amount) public {
-        if (mintModes == address(0)) return;
+        if (mintModes == address(0) || to == address(0)) return;
         try IMintModePolicy(mintModes).mintModeFor(to) returns (MintMode mode) {
             if (mode != MintMode.PRIVATE) return;
         } catch {
@@ -281,7 +287,10 @@ library ERC20ConfidentialLib {
         emit UnshieldedTokensClaimed(claim.to, id, FHE.wrapEuint64(claim.ctHash), claim.decryptedAmount);
     }
 
+    /// @dev Reverts on `to == address(0)`, like {FHERC20Core-_mint}: otherwise the pool gains
+    /// public backing that no confidential balance owns and that can never be unshielded.
     function confidentialMint(address to, uint64 amount) public {
+        if (to == address(0)) revert ConfidentialInvalidReceiver(address(0));
         ERC20ConfidentialStorage storage $ = _getERC20ConfidentialStorage();
         IConfidentialLedger(address(this)).__ledger(address(0), CONFIDENTIAL_POOL, uint256(amount) * $._conversionRate);
         update(address(0), to, FHE.asEuint64(amount));

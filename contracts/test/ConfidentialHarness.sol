@@ -29,6 +29,14 @@ contract ConfidentialHarness is ERC20ConfidentialCoreUpgradeable {
         _confidentialMint(to, amount);
     }
 
+    function shieldToPublic(address to, uint256 amount) external {
+        ERC20ConfidentialLib.shieldTo(to, amount);
+    }
+
+    function autoShieldPublic(address mintModes, address to, uint256 amount) external {
+        ERC20ConfidentialLib.autoShield(mintModes, to, amount);
+    }
+
     function setObserverPublic(address obs) external {
         _setObserver(obs);
     }
