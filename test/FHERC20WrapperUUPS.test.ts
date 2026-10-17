@@ -2,6 +2,7 @@ import { expect } from "chai";
 import hre, { ethers } from "hardhat";
 import { ContractTransactionResponse } from "ethers";
 import { ERC20_Harness, FHERC20ERC20WrapperUUPS, FHERC20NativeWrapperUUPS, WETH_Harness } from "../typechain-types";
+import { getIFHERC20ERC20WrapperInterfaceId, getIFHERC20NativeWrapperInterfaceId } from "./FHERC20.behavior";
 
 // The wrappers delegate claim bookkeeping to the external ERC20ConfidentialLib, so link it.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
@@ -187,6 +188,12 @@ describe("FHERC20ERC20WrapperUUPS", function () {
     expect(await token.indicatorTick()).to.equal(100n);
   });
 
+  it("supports the wrapper interface through the proxy", async function () {
+    const { token } = await deployERC20Wrapper();
+
+    expect(await token.supportsInterface(getIFHERC20ERC20WrapperInterfaceId())).to.equal(true);
+  });
+
   it("cannot be initialized twice, nor on the implementation", async function () {
     const { token, impl, wBTC, bob } = await deployERC20Wrapper();
     const underlying = await wBTC.getAddress();
@@ -263,6 +270,12 @@ describe("FHERC20NativeWrapperUUPS", function () {
     expect(await token.owner()).to.equal(owner.address);
     // Sized from the capped 6 decimals. wETH's 18 would give 1e14.
     expect(await token.indicatorTick()).to.equal(100n);
+  });
+
+  it("supports the wrapper interface through the proxy", async function () {
+    const { token } = await deployNativeWrapper();
+
+    expect(await token.supportsInterface(getIFHERC20NativeWrapperInterfaceId())).to.equal(true);
   });
 
   it("cannot be initialized twice, nor on the implementation", async function () {
