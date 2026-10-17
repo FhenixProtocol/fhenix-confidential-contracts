@@ -91,6 +91,7 @@ export function getIFHERC20NativeWrapperInterfaceId(): string {
     "unshield(address,address,uint64)",
     "unshield(address,address,bytes32)",
     "claimUnshielded(bytes32,uint64,bytes)",
+    "claimUnshieldedAsWETH(bytes32,uint64,bytes)",
     "rate()",
     "weth()",
   ]);
