@@ -15,6 +15,7 @@ import {
   prepExpectFHERC20BalancesChange,
   expectFHERC20BalancesChange,
 } from "./utils";
+import { getIFHERC20InterfaceId } from "./FHERC20.behavior";
 
 type ERC20ConfidentialToken = MockERC20Confidential | ERC20ConfidentialUpgradeable_Harness;
 
@@ -93,6 +94,14 @@ export function shouldBehaveLikeERC20Confidential(
       expect(await indicator.name()).to.equal("1011000 Confidential Token");
       expect(await indicator.symbol()).to.equal("cCTK");
       expect(await indicator.decimals()).to.equal(4);
+    });
+
+    it("Should advertise IFHERC20 in real-ledger mode", async function () {
+      const { token } = await setupFixture();
+
+      expect(await token.supportsInterface(getIFHERC20InterfaceId())).to.equal(true);
+      expect(await token.balanceOfIsIndicator()).to.equal(false);
+      expect(await token.indicatorTick()).to.equal(0n);
     });
   });
 
