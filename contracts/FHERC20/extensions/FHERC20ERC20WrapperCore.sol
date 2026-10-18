@@ -49,10 +49,14 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
         }
     }
 
+    error FHERC20InvalidUnderlying(address underlying);
     error FHERC20TotalSupplyOverflow();
 
     /// @dev Plain `internal` — the host guards one-time setup (constructor or OZ initializer).
     function __FHERC20ERC20WrapperCore_init(IERC20 underlying_) internal {
+        address underlyingAddress = address(underlying_);
+        if (underlyingAddress.code.length == 0) revert FHERC20InvalidUnderlying(underlyingAddress);
+
         FHERC20ERC20WrapperStorage storage $ = _getFHERC20ERC20WrapperStorage();
         $._underlying = underlying_;
 
