@@ -201,6 +201,23 @@ describe("FHERC20ERC20WrapperUUPS", function () {
     );
   });
 
+  it("rejects zero-aligned shields through the proxy and accepts the smallest aligned amount", async function () {
+    const { token, wBTC, bob } = await deployERC20Wrapper();
+
+    for (const amount of [0n, rate - 1n]) {
+      await expect(token.connect(bob).shield(bob, amount)).to.be.revertedWithCustomError(
+        token,
+        "AmountTooSmallForConfidentialPrecision",
+      );
+    }
+
+    await wBTC.mint(bob, rate);
+    await wBTC.connect(bob).approve(token.target, rate);
+    await token.connect(bob).shield(bob, rate);
+
+    await hre.cofhe.mocks.expectPlaintext(await token.confidentialBalanceOf(bob), 1n);
+  });
+
   it("shields, unshields and claims through the proxy", async function () {
     const { token, wBTC, bob, alice } = await deployERC20Wrapper();
     const bobClient = await hre.cofhe.createClientWithBatteries(bob);

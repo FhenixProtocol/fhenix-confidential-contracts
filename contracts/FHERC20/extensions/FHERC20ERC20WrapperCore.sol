@@ -50,6 +50,7 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
     }
 
     error FHERC20TotalSupplyOverflow();
+    error AmountTooSmallForConfidentialPrecision();
 
     /// @dev Plain `internal` — the host guards one-time setup (constructor or OZ initializer).
     function __FHERC20ERC20WrapperCore_init(IERC20 underlying_) internal {
@@ -81,9 +82,10 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
         if (underlying() != msg.sender) revert FHERC20UnauthorizedCaller(msg.sender);
 
         address to = data.length < 20 ? from : address(bytes20(data));
-        _mint(to, FHE.asEuint64(SafeCast.toUint64(amount / rate())));
+        (uint256 alignedAmount, uint64 confidentialAmount) = _alignShieldAmount(amount);
+        _mint(to, FHE.asEuint64(confidentialAmount));
 
-        uint256 excess = amount % rate();
+        uint256 excess = amount - alignedAmount;
         if (excess > 0) SafeERC20.safeTransfer(IERC20(underlying()), from, excess);
 
         return IERC1363Receiver.onTransferReceived.selector;
@@ -97,9 +99,10 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
      * Returns the amount of shielded token sent.
      */
     function shield(address to, uint256 amount) public virtual override nonReentrant returns (sharedEuint64) {
-        SafeERC20.safeTransferFrom(IERC20(underlying()), msg.sender, address(this), amount - (amount % rate()));
+        (uint256 alignedAmount, uint64 confidentialAmount) = _alignShieldAmount(amount);
+        SafeERC20.safeTransferFrom(IERC20(underlying()), msg.sender, address(this), alignedAmount);
 
-        euint64 shieldedAmountSent = _mint(to, FHE.asEuint64(SafeCast.toUint64(amount / rate())));
+        euint64 shieldedAmountSent = _mint(to, FHE.asEuint64(confidentialAmount));
 
         return FHE.shareEuint64(shieldedAmountSent, msg.sender);
     }
@@ -217,6 +220,16 @@ abstract contract FHERC20ERC20WrapperCore is FHERC20Core, IFHERC20ERC20Wrapper, 
     /// @inheritdoc FHERC20WrapperClaims
     function _isClaimOperator(address holder, address spender) internal view virtual override returns (bool) {
         return isOperator(holder, spender);
+    }
+
+    /// @dev Aligns an underlying amount to the wrapper rate and rejects a zero confidential result.
+    function _alignShieldAmount(
+        uint256 amount
+    ) private view returns (uint256 alignedAmount, uint64 confidentialAmount) {
+        uint256 conversionRate = rate();
+        alignedAmount = amount - (amount % conversionRate);
+        if (alignedAmount == 0) revert AmountTooSmallForConfidentialPrecision();
+        confidentialAmount = SafeCast.toUint64(alignedAmount / conversionRate);
     }
 
     /// @dev Shared internal logic for both unshield overloads.

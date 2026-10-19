@@ -4,6 +4,7 @@
 pragma solidity ^0.8.25;
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { ERC1363 } from "@openzeppelin/contracts/token/ERC20/extensions/ERC1363.sol";
 import { IWETH } from "../interfaces/IWETH.sol";
 
 contract ERC20_Harness is ERC20 {
@@ -23,6 +24,22 @@ contract ERC20_Harness is ERC20 {
 
     function burn(address account, uint256 value) public {
         _burn(account, value);
+    }
+}
+
+contract ERC1363_Harness is ERC1363 {
+    uint8 private immutable _tokenDecimals;
+
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
+        _tokenDecimals = decimals_;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _tokenDecimals;
+    }
+
+    function mint(address account, uint256 value) public {
+        _mint(account, value);
     }
 }
 

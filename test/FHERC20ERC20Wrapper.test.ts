@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import hre, { ethers } from "hardhat";
-import { FHERC20ERC20Wrapper_Harness, ERC20_Harness } from "../typechain-types";
+import { FHERC20ERC20Wrapper_Harness, ERC20_Harness, ERC1363_Harness } from "../typechain-types";
 import {
   expectERC20BalancesChange,
   expectFHERC20BalancesChange,
@@ -61,6 +61,27 @@ describe("FHERC20ERC20Wrapper", function () {
     return { wBTC, eBTC };
   };
 
+  const deployERC1363Contracts = async () => {
+    const wBTCFactory = await ethers.getContractFactory("ERC1363_Harness");
+    const wBTC = (await wBTCFactory.deploy("Wrapped BTC", "wBTC", 8)) as ERC1363_Harness;
+    await wBTC.waitForDeployment();
+
+    const lib = await ethers.deployContract(LIB_FQN);
+    await lib.waitForDeployment();
+    const eBTCFactory = await ethers.getContractFactory("FHERC20ERC20Wrapper_Harness", {
+      libraries: { [LIB_FQN]: await lib.getAddress() },
+    });
+    const eBTC = (await eBTCFactory.deploy(
+      wBTC.target,
+      "FHERC20 Wrapped BTC",
+      "eBTC",
+      "https://example.com/ebtc.json",
+    )) as FHERC20ERC20Wrapper_Harness;
+    await eBTC.waitForDeployment();
+
+    return { wBTC, eBTC };
+  };
+
   async function setupFixture() {
     const [owner, bob, alice, eve] = await ethers.getSigners();
     const { wBTC, eBTC } = await deployContracts();
@@ -103,6 +124,27 @@ describe("FHERC20ERC20Wrapper", function () {
   });
 
   describe("shield (ERC20 → FHERC20)", function () {
+    for (const amount of [0n, conversionRate - 1n]) {
+      it(`should revert when amount ${amount} aligns to zero`, async function () {
+        const { eBTC, bob } = await setupFixture();
+
+        await expect(eBTC.connect(bob).shield(bob, amount)).to.be.revertedWithCustomError(
+          eBTC,
+          "AmountTooSmallForConfidentialPrecision",
+        );
+      });
+    }
+
+    it("should accept the smallest aligned amount", async function () {
+      const { eBTC, bob, wBTC } = await setupFixture();
+
+      await wBTC.mint(bob, conversionRate);
+      await wBTC.connect(bob).approve(eBTC.target, conversionRate);
+
+      await expect(eBTC.connect(bob).shield(bob, conversionRate)).to.emit(eBTC, "ConfidentialTransfer");
+      await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialBalanceOf(bob), 1n);
+    });
+
     it("should shield tokens successfully", async function () {
       const { eBTC, bob, wBTC } = await setupFixture();
 
@@ -178,6 +220,52 @@ describe("FHERC20ERC20Wrapper", function () {
 
       await expectFHERC20BalancesChange(eBTC, bob.address, confidentialValue);
       await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialTotalSupply(), confidentialValue * 2n);
+    });
+  });
+
+  describe("shield via ERC1363 callback", function () {
+    for (const amount of [0n, conversionRate - 1n]) {
+      it(`should revert when callback amount ${amount} aligns to zero`, async function () {
+        const [, bob] = await ethers.getSigners();
+        const { wBTC, eBTC } = await deployERC1363Contracts();
+
+        if (amount > 0n) await wBTC.mint(bob, amount);
+
+        await expect(
+          wBTC.connect(bob)["transferAndCall(address,uint256)"](eBTC.target, amount),
+        ).to.be.revertedWithCustomError(eBTC, "AmountTooSmallForConfidentialPrecision");
+
+        expect(await wBTC.balanceOf(bob)).to.equal(amount);
+        expect(await wBTC.balanceOf(eBTC.target)).to.equal(0n);
+      });
+    }
+
+    it("should accept the smallest aligned callback amount", async function () {
+      const [, bob] = await ethers.getSigners();
+      const { wBTC, eBTC } = await deployERC1363Contracts();
+
+      await wBTC.mint(bob, conversionRate);
+
+      await expect(wBTC.connect(bob)["transferAndCall(address,uint256)"](eBTC.target, conversionRate)).to.emit(
+        eBTC,
+        "ConfidentialTransfer",
+      );
+      await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialBalanceOf(bob), 1n);
+      expect(await wBTC.balanceOf(eBTC.target)).to.equal(conversionRate);
+    });
+
+    it("should refund callback dust above an aligned amount", async function () {
+      const [, bob] = await ethers.getSigners();
+      const { wBTC, eBTC } = await deployERC1363Contracts();
+      const dust = 37n;
+      const amount = conversionRate + dust;
+
+      await wBTC.mint(bob, amount);
+      await wBTC.connect(bob)["transferAndCall(address,uint256)"](eBTC.target, amount);
+
+      await hre.cofhe.mocks.expectPlaintext(await eBTC.confidentialBalanceOf(bob), 1n);
+      expect(await wBTC.balanceOf(bob)).to.equal(dust);
+      expect(await wBTC.balanceOf(eBTC.target)).to.equal(conversionRate);
     });
   });
 
