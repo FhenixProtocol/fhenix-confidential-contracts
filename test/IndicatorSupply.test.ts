@@ -13,7 +13,7 @@ import { MockERC20Confidential, ERC20ConfidentialIndicator } from "../typechain-
 // operation — matching FHERC20Core's indicator, which always behaved this way — and totalSupply
 // is a tracked counter that equals the sum exactly.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
-const MARKER = 10_110_000_000n;
+const MARKER = 79_840_000n;
 
 describe("indicator supply accounting (Diligence 5.18)", function () {
   async function fixture() {
