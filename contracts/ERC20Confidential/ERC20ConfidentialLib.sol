@@ -77,7 +77,7 @@ library ERC20ConfidentialLib {
 
     // Pool that custodies the public ledger tokens backing confidential balances.
     // Mirrors the constant in ERC20ConfidentialCoreUpgradeable.
-    address constant CONFIDENTIAL_POOL = address(0x1011000000000000000000000000000000000000);
+    address constant CONFIDENTIAL_POOL = address(0x7984000000000000000000000000000000000000);
 
     // Mirrors ERC20ConfidentialCoreUpgradeable's ERC-7201 slot (the namespace is fixed,
     // so it is identical for every host). Newer entry points ({autoShield},

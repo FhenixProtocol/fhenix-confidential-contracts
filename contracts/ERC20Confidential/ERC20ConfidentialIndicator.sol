@@ -13,8 +13,8 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  */
 contract ERC20ConfidentialIndicator is ERC20 {
     /// @dev Offset applied to every ACTIVE account's indicated balance, so a wallet renders the
-    /// brand marker (`1011000.xxxx` at 4 decimals) with the fractional digits carrying activity.
-    uint256 private constant _MARKER = 10110000000;
+    /// brand marker (`7984.xxxx` at 4 decimals) with the fractional digits carrying activity.
+    uint256 private constant _MARKER = 79_840_000;
     uint256 private constant _ON_FIRST_RECEIVE = 5001;
     uint256 private constant _ON_FIRST_SEND = 4999;
     uint256 private constant _MAX_INDICATED = 9999;
@@ -42,7 +42,7 @@ contract ERC20ConfidentialIndicator is ERC20 {
         address parentAddress,
         string memory parentName,
         string memory parentSymbol
-    ) ERC20(string.concat("1011000 ", parentName), string.concat("c", parentSymbol)) {
+    ) ERC20(string.concat("7984 ", parentName), string.concat("c", parentSymbol)) {
         parent = parentAddress;
     }
 

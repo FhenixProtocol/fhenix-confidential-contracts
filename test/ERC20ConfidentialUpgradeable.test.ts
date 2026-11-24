@@ -121,7 +121,7 @@ describe("ERC20ConfidentialUpgradeable", function () {
       expect(await indicator.parent()).to.equal(await token.getAddress());
 
       // The indicator's name/symbol are derived from the parent's at init time.
-      expect(await indicator.name()).to.equal("1011000 Proxy Token");
+      expect(await indicator.name()).to.equal("7984 Proxy Token");
       expect(await indicator.symbol()).to.equal("cPTK");
     });
 

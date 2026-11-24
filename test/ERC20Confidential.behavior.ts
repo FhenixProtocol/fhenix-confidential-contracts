@@ -90,7 +90,7 @@ export function shouldBehaveLikeERC20Confidential(
       expect(await token.decimals()).to.equal(18);
       expect(await token.confidentialDecimals()).to.equal(6);
 
-      expect(await indicator.name()).to.equal("1011000 Confidential Token");
+      expect(await indicator.name()).to.equal("7984 Confidential Token");
       expect(await indicator.symbol()).to.equal("cCTK");
       expect(await indicator.decimals()).to.equal(4);
     });
@@ -119,7 +119,7 @@ export function shouldBehaveLikeERC20Confidential(
       const balanceHandle = await token.confidentialBalanceOf(bob.address);
       await hre.cofhe.mocks.expectPlaintext(balanceHandle, expectedConfidentialAmount);
 
-      expect(await indicator.balanceOf(bob.address)).to.equal(10110005001n);
+      expect(await indicator.balanceOf(bob.address)).to.equal(79845001n);
     });
 
     it("Should fail to shield amounts too small for confidential precision", async function () {
@@ -388,8 +388,8 @@ export function shouldBehaveLikeERC20Confidential(
       await hre.cofhe.mocks.expectPlaintext(bobBalance, BigInt(5 * 1e6));
       await hre.cofhe.mocks.expectPlaintext(aliceBalance, BigInt(5 * 1e6));
 
-      expect(await indicator.balanceOf(bob.address)).to.equal(10110005000n);
-      expect(await indicator.balanceOf(alice.address)).to.equal(10110005001n);
+      expect(await indicator.balanceOf(bob.address)).to.equal(79845000n);
+      expect(await indicator.balanceOf(alice.address)).to.equal(79845001n);
     });
 
     // The debit is saturating and all-or-nothing (FHESafeMath.tryDecrease): an over-balance transfer

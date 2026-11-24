@@ -6,7 +6,7 @@ import hre, { ethers } from "hardhat";
 // `__ledger` bridge), against the real CoFHE mocks. Uses a minimal confidential
 // token harness that shares the exact core + library production hosts use.
 const LIB_FQN = "contracts/ERC20Confidential/ERC20ConfidentialLib.sol:ERC20ConfidentialLib";
-const POOL = "0x1011000000000000000000000000000000000000";
+const POOL = "0x7984000000000000000000000000000000000000";
 
 async function deployHarness() {
   const lib = await ethers.deployContract(LIB_FQN);
